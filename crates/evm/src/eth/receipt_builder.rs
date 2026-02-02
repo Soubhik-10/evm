@@ -59,7 +59,7 @@ impl ReceiptBuilder for AlloyReceiptBuilder {
             logs: ctx.result.into_logs(),
         }
         .with_bloom();
-
+        tracing::debug!("Logs in receipt builder: {:?}", receipt);
         match ctx.tx_type {
             TxType::Legacy => ReceiptEnvelope::Legacy(receipt),
             TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt),

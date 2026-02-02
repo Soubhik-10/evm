@@ -190,6 +190,8 @@ where
 
         let gas_used = result.gas_used();
 
+        tracing::debug!("Gas used: {:?}", gas_used);
+        tracing::debug!("Logs before gas calculation: {:?}", result.clone().into_logs());
         // EIP-7778: Track gas accounting differently for Amsterdam
         // - gas_used (for block accounting): gas before refunds
         // - gas_spent (for user receipts): gas after refunds (what user pays)
@@ -224,7 +226,7 @@ where
         if self.spec.is_cancun_active_at_timestamp(self.evm.block().timestamp().saturating_to()) {
             self.blob_gas_used = self.blob_gas_used.saturating_add(blob_gas_used);
         }
-
+        tracing::debug!("Logs after gas calculation: {:?}", result.clone().into_logs());
         // Push transaction changeset and calculate header bloom filter for receipt.
         self.receipts.push(self.receipt_builder.build_receipt(ReceiptBuilderCtx {
             tx_type,
