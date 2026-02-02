@@ -307,7 +307,7 @@ where
                 )
             })
         })?;
-
+        tracing::debug!("Receipts from evm: {:?}", self.receipts);
         Ok((
             self.evm,
             BlockExecutionResult {
