@@ -173,6 +173,7 @@ where
             BlockExecutionError::evm(err, hash)
         })?;
 
+        tracing::debug!("Result from evm: {:?}", result);
         Ok(EthTxResult {
             result,
             blob_gas_used: tx.tx().blob_gas_used().unwrap_or_default(),
@@ -190,6 +191,7 @@ where
 
         let gas_used = result.gas_used();
 
+        tracing::debug!("Result from evm: {:?}", result);
         tracing::debug!("Gas used: {:?}", gas_used);
         tracing::debug!("Logs before gas calculation: {:?}", result.clone().into_logs());
         // EIP-7778: Track gas accounting differently for Amsterdam
