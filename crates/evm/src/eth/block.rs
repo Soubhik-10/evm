@@ -21,7 +21,7 @@ use alloy_eips::{eip4895::Withdrawals, eip7685::Requests, Encodable2718};
 use alloy_hardforks::EthereumHardfork;
 use alloy_primitives::{Bytes, Log, B256};
 use revm::{
-    context::Block,
+    context::{result::ExecutionResult, Block},
     context_interface::result::ResultAndState,
     database::{DatabaseCommitExt, State},
     DatabaseCommit, Inspector,
@@ -42,6 +42,8 @@ pub struct EthBlockExecutionCtx<'a> {
     pub extra_data: Bytes,
     /// Block transactions count hint. Used to preallocate the receipts vector.
     pub tx_count_hint: Option<usize>,
+    /// Slot number (EIP-7928, Amsterdam).
+    pub slot_number: Option<u64>,
 }
 
 /// Block executor for Ethereum.
@@ -62,7 +64,16 @@ pub struct EthBlockExecutor<'a, Evm, Spec, R: ReceiptBuilder> {
     /// Receipts of executed transactions.
     pub receipts: Vec<R::Receipt>,
     /// Total gas used by transactions in this block.
+    ///
+    /// Before Osaka, this tracks gas after refunds.
+    /// After Osaka (EIP-7778), this tracks gas before refunds for block gas accounting.
     pub gas_used: u64,
+
+    /// Total gas spent by transactions in this block (after refunds, what users pay).
+    ///
+    /// This is only tracked when EIP-7778 is active (Osaka hardfork).
+    /// Before Osaka, this is always `None`.
+    pub gas_spent: Option<u64>,
 
     /// Blob gas used by the block.
     /// Before cancun activation, this is always 0.
@@ -82,6 +93,7 @@ where
             ctx,
             receipts: Vec::with_capacity(tx_count_hint),
             gas_used: 0,
+            gas_spent: None,
             blob_gas_used: 0,
             system_caller: SystemCaller::new(spec.clone()),
             spec,
@@ -151,8 +163,37 @@ where
 
         let gas_used = result.gas_used();
 
-        // append gas used
-        self.gas_used += gas_used;
+        tracing::debug!("Gas used: {:?}", gas_used);
+        tracing::debug!("Logs before gas calculation: {:?}", result.clone().into_logs());
+        // EIP-7778: Track gas accounting differently for Amsterdam
+        // - gas_used (for block accounting): gas before refunds
+        // - gas_spent (for user receipts): gas after refunds (what user pays)
+        let is_amsterdam = self
+            .spec
+            .is_amsterdam_active_at_timestamp(self.evm.block().timestamp().saturating_to());
+
+        let (cumulative_gas_used, gas_spent) = if is_amsterdam {
+            // Get gas_refunded from the result (only Success variant has refunds)
+            let gas_refunded = match &result {
+                ExecutionResult::Success { gas_refunded, .. } => *gas_refunded,
+                _ => 0,
+            };
+
+            // gas_used from result is already after refunds
+            let tx_gas_spent = gas_used;
+            // gas before refunds = gas after refunds + refunded amount
+            let tx_gas_used_before_refunds = gas_used + gas_refunded;
+
+            self.gas_used += tx_gas_used_before_refunds;
+            let cumulative_gas_spent = self.gas_spent.get_or_insert(0).saturating_add(tx_gas_spent);
+            *self.gas_spent.as_mut().unwrap() = cumulative_gas_spent;
+
+            (self.gas_used, Some(cumulative_gas_spent))
+        } else {
+            // Pre-Amsterdam: gas_used tracks gas after refunds
+            self.gas_used += gas_used;
+            (self.gas_used, None)
+        };
 
         // only determine cancun fields when active
         if self.spec.is_cancun_active_at_timestamp(self.evm.block().timestamp().saturating_to()) {
@@ -160,14 +201,15 @@ where
 
             self.blob_gas_used = self.blob_gas_used.saturating_add(tx_blob_gas_used);
         }
-
+        tracing::debug!("Logs after gas calculation: {:?}", result.clone().into_logs());
         // Push transaction changeset and calculate header bloom filter for receipt.
         self.receipts.push(self.receipt_builder.build_receipt(ReceiptBuilderCtx {
             tx: tx.tx(),
             evm: &self.evm,
             result,
             state: &state,
-            cumulative_gas_used: self.gas_used,
+            cumulative_gas_used,
+            gas_spent,
         }));
 
         // Commit the state changes.
@@ -240,7 +282,7 @@ where
                 )
             })
         })?;
-
+        tracing::debug!("Receipts from evm: {:?}", self.receipts);
         Ok((
             self.evm,
             BlockExecutionResult {
