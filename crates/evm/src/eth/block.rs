@@ -11,12 +11,12 @@ use crate::{
         state_changes::{balance_increment_state, post_block_balance_increments},
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
         BlockExecutorFor, BlockValidationError, ExecutableTx, OnStateHook,
-        StateChangePostBlockSource, StateChangeSource, SystemCaller, TxResult,
+        StateChangePostBlockSource, StateChangeSource, SystemCaller,
     },
-    Database, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded, RecoveredTx,
+    Database, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
-use alloy_consensus::{Header, Transaction, TransactionEnvelope, TxReceipt};
+use alloy_consensus::{Header, Transaction, TxReceipt};
 use alloy_eips::{eip4895::Withdrawals, eip7685::Requests, Encodable2718};
 use alloy_hardforks::EthereumHardfork;
 use alloy_primitives::{Bytes, Log, B256};
@@ -69,25 +69,6 @@ pub struct EthBlockExecutor<'a, Evm, Spec, R: ReceiptBuilder> {
     pub blob_gas_used: u64,
 }
 
-/// The result of executing an Ethereum transaction.
-#[derive(Debug)]
-pub struct EthTxResult<H, T> {
-    /// Result of the transaction execution.
-    pub result: ResultAndState<H>,
-    /// Blob gas used by the transaction.
-    pub blob_gas_used: u64,
-    /// Type of the transaction.
-    pub tx_type: T,
-}
-
-impl<H, T> TxResult for EthTxResult<H, T> {
-    type HaltReason = H;
-
-    fn result(&self) -> &ResultAndState<Self::HaltReason> {
-        &self.result
-    }
-}
-
 impl<'a, Evm, Spec, R> EthBlockExecutor<'a, Evm, Spec, R>
 where
     Spec: Clone,
@@ -122,7 +103,6 @@ where
     type Transaction = R::Transaction;
     type Receipt = R::Receipt;
     type Evm = E;
-    type Result = EthTxResult<E::HaltReason, <R::Transaction as TransactionEnvelope>::TxType>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
@@ -140,9 +120,7 @@ where
     fn execute_transaction_without_commit(
         &mut self,
         tx: impl ExecutableTx<Self>,
-    ) -> Result<Self::Result, BlockExecutionError> {
-        let (tx_env, tx) = tx.into_parts();
-
+    ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
         // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
         // must be no greater than the block's gasLimit.
         let block_available_gas = self.evm.block().gas_limit() - self.gas_used;
@@ -156,21 +134,18 @@ where
         }
 
         // Execute transaction and return the result
-        let result = self.evm.transact(tx_env).map_err(|err| {
+        self.evm.transact(&tx).map_err(|err| {
             let hash = tx.tx().trie_hash();
             BlockExecutionError::evm(err, hash)
-        })?;
-
-        Ok(EthTxResult {
-            result,
-            blob_gas_used: tx.tx().blob_gas_used().unwrap_or_default(),
-            tx_type: tx.tx().tx_type(),
         })
     }
 
-    fn commit_transaction(&mut self, output: Self::Result) -> Result<u64, BlockExecutionError> {
-        let EthTxResult { result: ResultAndState { result, state }, blob_gas_used, tx_type } =
-            output;
+    fn commit_transaction(
+        &mut self,
+        output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<u64, BlockExecutionError> {
+        let ResultAndState { result, state } = output;
 
         self.system_caller.on_state(StateChangeSource::Transaction(self.receipts.len()), &state);
 
@@ -181,12 +156,14 @@ where
 
         // only determine cancun fields when active
         if self.spec.is_cancun_active_at_timestamp(self.evm.block().timestamp().saturating_to()) {
-            self.blob_gas_used = self.blob_gas_used.saturating_add(blob_gas_used);
+            let tx_blob_gas_used = tx.tx().blob_gas_used().unwrap_or_default();
+
+            self.blob_gas_used = self.blob_gas_used.saturating_add(tx_blob_gas_used);
         }
 
         // Push transaction changeset and calculate header bloom filter for receipt.
         self.receipts.push(self.receipt_builder.build_receipt(ReceiptBuilderCtx {
-            tx_type,
+            tx: tx.tx(),
             evm: &self.evm,
             result,
             state: &state,

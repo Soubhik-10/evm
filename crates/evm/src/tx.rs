@@ -430,16 +430,6 @@ where
     }
 }
 
-impl<Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for Arc<T> {
-    fn tx(&self) -> &Tx {
-        (**self).tx()
-    }
-
-    fn signer(&self) -> &Address {
-        (**self).signer()
-    }
-}
-
 /// Helper trait for building a transaction environment from a transaction with its encoded form.
 ///
 /// This trait enables the conversion of consensus transaction types along with their EIP-2718
