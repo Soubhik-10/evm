@@ -321,6 +321,11 @@ where
             })
         })?;
         tracing::debug!("Receipts from evm: {:?}", self.receipts);
+        tracing::debug!(
+            "Block Execution Result: gas spent {:?}, gas used {:?}",
+            self.gas_spent,
+            self.gas_used
+        );
         Ok((
             self.evm,
             BlockExecutionResult {
