@@ -184,6 +184,8 @@ where
     fn commit_transaction(&mut self, output: Self::Result) -> Result<u64, BlockExecutionError> {
         use revm::context::result::ExecutionResult;
 
+        tracing::debug!("output result evm: {:?}", output.result());
+
         let EthTxResult { result: ResultAndState { result, state }, blob_gas_used, tx_type } =
             output;
 
@@ -193,7 +195,13 @@ where
 
         tracing::debug!("Result from evm: {:?}", result);
         tracing::debug!("Gas used: {:?}", gas_used);
-        tracing::debug!("Logs before gas calculation: {:?}", result.clone().into_logs());
+        tracing::debug!("Logs before gas calculation: {:?}", result.clone().logs());
+
+        // only determine cancun fields when active
+        if self.spec.is_cancun_active_at_timestamp(self.evm.block().timestamp().saturating_to()) {
+            self.blob_gas_used = self.blob_gas_used.saturating_add(blob_gas_used);
+        }
+
         // EIP-7778: Track gas accounting differently for Amsterdam
         // - gas_used (for block accounting): gas before refunds
         // - gas_spent (for user receipts): gas after refunds (what user pays)
@@ -224,11 +232,7 @@ where
             (self.gas_used, None)
         };
 
-        // only determine cancun fields when active
-        if self.spec.is_cancun_active_at_timestamp(self.evm.block().timestamp().saturating_to()) {
-            self.blob_gas_used = self.blob_gas_used.saturating_add(blob_gas_used);
-        }
-        tracing::debug!("Logs after gas calculation: {:?}", result.clone().into_logs());
+        tracing::debug!("Logs after gas calculation: {:?}", result.clone().logs());
         // Push transaction changeset and calculate header bloom filter for receipt.
         self.receipts.push(self.receipt_builder.build_receipt(ReceiptBuilderCtx {
             tx_type,
