@@ -220,6 +220,11 @@ where
             let tx_gas_spent = gas_used;
             // gas before refunds = gas after refunds + refunded amount
             let tx_gas_used_before_refunds = gas_used + gas_refunded;
+            tracing::debug!(
+                "Amsterdam gas accounting: gas_used_before_refunds: {}, gas_spent: {}",
+                tx_gas_used_before_refunds,
+                tx_gas_spent
+            );
 
             self.gas_used += tx_gas_used_before_refunds;
             let cumulative_gas_spent = self.gas_spent.get_or_insert(0).saturating_add(tx_gas_spent);
@@ -231,6 +236,8 @@ where
             self.gas_used += gas_used;
             (self.gas_used, None)
         };
+        tracing::debug!("cumulative_gas_used: {:?}", cumulative_gas_used);
+        tracing::debug!("gas_spent: {:?}", gas_spent);
 
         tracing::debug!("Logs after gas calculation: {:?}", result.clone().logs());
         // Push transaction changeset and calculate header bloom filter for receipt.
