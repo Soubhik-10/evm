@@ -1,5 +1,7 @@
 //! Ethereum block executor.
 
+use std::cmp::max;
+
 use super::{
     dao_fork, eip6110,
     receipt_builder::{AlloyReceiptBuilder, ReceiptBuilder, ReceiptBuilderCtx},
@@ -17,13 +19,16 @@ use crate::{
 };
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_consensus::{Header, Transaction, TransactionEnvelope, TxReceipt};
-use alloy_eips::{eip4895::Withdrawals, eip7685::Requests, Encodable2718};
+use alloy_eips::{
+    eip4895::Withdrawals, eip7623::tokens_in_calldata, eip7685::Requests, Encodable2718,
+};
 use alloy_hardforks::EthereumHardfork;
 use alloy_primitives::{Bytes, Log, B256};
 use revm::{
     context::Block,
-    context_interface::result::ResultAndState,
+    context_interface::{cfg::GasParams, result::ResultAndState},
     database::{DatabaseCommitExt, State},
+    primitives::hardfork::SpecId::AMSTERDAM,
     DatabaseCommit, Inspector,
 };
 
@@ -89,8 +94,8 @@ pub struct EthTxResult<H, T> {
     pub blob_gas_used: u64,
     /// Type of the transaction.
     pub tx_type: T,
-    ///
-    pub gas_limit: Option<u64>,
+    /// Floor cost estimation.
+    pub floor_cost: Option<u64>,
 }
 
 impl<H, T> TxResult for EthTxResult<H, T> {
@@ -176,11 +181,14 @@ where
             BlockExecutionError::evm(err, hash)
         })?;
 
+        let floor_cost =
+            GasParams::new_spec(AMSTERDAM).tx_floor_cost(tokens_in_calldata(tx.tx().input()));
+
         Ok(EthTxResult {
             result,
             blob_gas_used: tx.tx().blob_gas_used().unwrap_or_default(),
             tx_type: tx.tx().tx_type(),
-            gas_limit: Some(tx.tx().gas_limit()),
+            floor_cost: Some(floor_cost),
         })
     }
 
@@ -191,7 +199,7 @@ where
             result: ResultAndState { result, state },
             blob_gas_used,
             tx_type,
-            gas_limit,
+            floor_cost,
         } = output;
         tracing::debug!("Tx result : {:?}", result);
         self.system_caller.on_state(StateChangeSource::Transaction(self.receipts.len()), &state);
@@ -210,22 +218,17 @@ where
             // Get gas_refunded from the result (only Success variant has refunds)
             let gas_refunded = match &result {
                 ExecutionResult::Success { gas_refunded, .. } => *gas_refunded,
-                ExecutionResult::Revert { gas_used, .. } => {
-                    tracing::debug!("Gas limit: {:?}", gas_limit);
-                    let refund = gas_limit.unwrap() - gas_used;
-                    tracing::debug!("Gas refund for rervert is  : {:?}", refund);
-                    refund
-                }
                 _ => 0,
             };
             tracing::debug!(" gas refunded: {:?}", gas_refunded);
+            tracing::debug!("floor cost: {:?}", floor_cost);
             // gas_used from result is already after refunds
             let tx_gas_spent = gas_used;
             // gas before refunds = gas after refunds + refunded amount
             let tx_gas_used_before_refunds = gas_used + gas_refunded;
             tracing::debug!(" gas used before refunds: {:?}", tx_gas_used_before_refunds);
 
-            self.gas_used += tx_gas_used_before_refunds;
+            self.gas_used += max(tx_gas_used_before_refunds, floor_cost.unwrap_or(0));
             let cumulative_gas_spent = self.gas_spent.get_or_insert(0).saturating_add(tx_gas_spent);
             *self.gas_spent.as_mut().unwrap() = cumulative_gas_spent;
 
