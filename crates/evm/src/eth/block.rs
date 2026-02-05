@@ -166,7 +166,7 @@ where
             }
             .into());
         }
-
+        tracing::debug!("Sender of this tx is  {:?}", tx.signer());
         // Execute transaction and return the result
         let result = self.evm.transact(tx_env).map_err(|err| {
             let hash = tx.tx().trie_hash();
