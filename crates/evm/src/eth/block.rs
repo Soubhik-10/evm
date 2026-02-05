@@ -89,6 +89,8 @@ pub struct EthTxResult<H, T> {
     pub blob_gas_used: u64,
     /// Type of the transaction.
     pub tx_type: T,
+    ///
+    pub gas_limit: Option<u64>,
 }
 
 impl<H, T> TxResult for EthTxResult<H, T> {
@@ -177,14 +179,19 @@ where
             result,
             blob_gas_used: tx.tx().blob_gas_used().unwrap_or_default(),
             tx_type: tx.tx().tx_type(),
+            gas_limit: Some(tx.tx().gas_limit()),
         })
     }
 
     fn commit_transaction(&mut self, output: Self::Result) -> Result<u64, BlockExecutionError> {
         use revm::context::result::ExecutionResult;
 
-        let EthTxResult { result: ResultAndState { result, state }, blob_gas_used, tx_type } =
-            output;
+        let EthTxResult {
+            result: ResultAndState { result, state },
+            blob_gas_used,
+            tx_type,
+            gas_limit,
+        } = output;
         tracing::debug!("Tx result : {:?}", result);
         self.system_caller.on_state(StateChangeSource::Transaction(self.receipts.len()), &state);
 
@@ -202,6 +209,11 @@ where
             // Get gas_refunded from the result (only Success variant has refunds)
             let gas_refunded = match &result {
                 ExecutionResult::Success { gas_refunded, .. } => *gas_refunded,
+                ExecutionResult::Revert { gas_used, .. } => {
+                    let refund = gas_limit.unwrap() - gas_used;
+                    tracing::debug!("Gas refund for rervert is  : {:?}", refund);
+                    refund
+                }
                 _ => 0,
             };
             tracing::debug!(" gas refunded: {:?}", gas_refunded);
