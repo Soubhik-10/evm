@@ -168,6 +168,7 @@ where
             }
             .into());
         }
+        tracing::debug!("Gas limit: {:?}", tx.tx().gas_limit());
         tracing::debug!("Sender of this tx is  {:?}", tx.signer());
         // Execute transaction and return the result
         let result = self.evm.transact(tx_env).map_err(|err| {
@@ -210,6 +211,7 @@ where
             let gas_refunded = match &result {
                 ExecutionResult::Success { gas_refunded, .. } => *gas_refunded,
                 ExecutionResult::Revert { gas_used, .. } => {
+                    tracing::debug!("Gas limit: {:?}", gas_limit);
                     let refund = gas_limit.unwrap() - gas_used;
                     tracing::debug!("Gas refund for rervert is  : {:?}", refund);
                     refund
