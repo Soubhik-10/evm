@@ -185,7 +185,7 @@ where
 
         let EthTxResult { result: ResultAndState { result, state }, blob_gas_used, tx_type } =
             output;
-
+        tracing::debug!("Tx result : {:?}", result);
         self.system_caller.on_state(StateChangeSource::Transaction(self.receipts.len()), &state);
 
         let gas_used = result.gas_used();
@@ -310,7 +310,7 @@ where
                 )
             })
         })?;
-
+        tracing::debug!("Gas used at last : {:?}", self.gas_used);
         Ok((
             self.evm,
             BlockExecutionResult {
