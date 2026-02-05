@@ -189,6 +189,7 @@ where
         self.system_caller.on_state(StateChangeSource::Transaction(self.receipts.len()), &state);
 
         let gas_used = result.gas_used();
+        tracing::debug!("Transaction gas used: {:?}", gas_used);
 
         // EIP-7778: Track gas accounting differently for Amsterdam
         // - gas_used (for block accounting): gas before refunds
@@ -203,22 +204,26 @@ where
                 ExecutionResult::Success { gas_refunded, .. } => *gas_refunded,
                 _ => 0,
             };
-
+            tracing::debug!(" gas refunded: {:?}", gas_refunded);
             // gas_used from result is already after refunds
             let tx_gas_spent = gas_used;
             // gas before refunds = gas after refunds + refunded amount
             let tx_gas_used_before_refunds = gas_used + gas_refunded;
+            tracing::debug!(" gas used before refunds: {:?}", tx_gas_used_before_refunds);
 
             self.gas_used += tx_gas_used_before_refunds;
             let cumulative_gas_spent = self.gas_spent.get_or_insert(0).saturating_add(tx_gas_spent);
             *self.gas_spent.as_mut().unwrap() = cumulative_gas_spent;
 
-            (cumulative_gas_spent, Some(self.gas_used))
+            (self.gas_used, Some(cumulative_gas_spent))
         } else {
             // Pre-Amsterdam: gas_used tracks gas after refunds
             self.gas_used += gas_used;
             (self.gas_used, None)
         };
+
+        tracing::debug!("Cumulative gas used: {}, gas spent: {:?}", cumulative_gas_used, gas_spent);
+        tracing::debug!(" gas used: {:?}", self.gas_used);
 
         // only determine cancun fields when active
         if self.spec.is_cancun_active_at_timestamp(self.evm.block().timestamp().saturating_to()) {
