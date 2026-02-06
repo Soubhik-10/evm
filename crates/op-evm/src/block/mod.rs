@@ -270,6 +270,7 @@ where
                 blob_gas_used: da_footprint_used,
                 tx_type: tx.tx().tx_type(),
                 floor_cost: None,
+                gas_limit: None,
             },
             is_deposit,
             sender: *tx.signer(),

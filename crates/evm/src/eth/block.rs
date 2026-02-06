@@ -1,6 +1,6 @@
 //! Ethereum block executor.
 
-use std::cmp::max;
+use core::cmp::max;
 
 use super::{
     dao_fork, eip6110,
@@ -97,6 +97,8 @@ pub struct EthTxResult<H, T> {
     pub tx_type: T,
     /// Floor cost estimation.
     pub floor_cost: Option<u64>,
+    /// Gas limit of the transaction.
+    pub gas_limit: Option<u64>,
 }
 
 impl<H, T> TxResult for EthTxResult<H, T> {
@@ -212,6 +214,7 @@ where
             blob_gas_used: tx.tx().blob_gas_used().unwrap_or_default(),
             tx_type: tx.tx().tx_type(),
             floor_cost: Some(gas.floor_gas),
+            gas_limit: Some(tx.tx().gas_limit()),
         })
     }
 
@@ -223,6 +226,7 @@ where
             blob_gas_used,
             tx_type,
             floor_cost,
+            gas_limit,
         } = output;
         tracing::debug!("Tx result : {:?}", result);
         self.system_caller.on_state(StateChangeSource::Transaction(self.receipts.len()), &state);
@@ -242,6 +246,9 @@ where
             // Refunds only exist for successful executions
             let gas_refunded = match &result {
                 ExecutionResult::Success { gas_refunded, .. } => *gas_refunded,
+                ExecutionResult::Revert { gas_used, .. } => {
+                    gas_limit.unwrap_or(0).saturating_sub(*gas_used)
+                }
                 _ => 0,
             };
 
