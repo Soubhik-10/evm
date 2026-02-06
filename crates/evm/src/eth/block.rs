@@ -247,6 +247,7 @@ where
             tracing::debug!("floor cost: {:?}", floor_cost);
             // gas_used from result is already after refunds
             let tx_gas_spent = gas_used;
+            let tx_gas_spent = max(tx_gas_spent, floor_cost.unwrap_or(0));
             // gas before refunds = gas after refunds + refunded amount
             let tx_gas_used_before_refunds = gas_used + gas_refunded;
             tracing::debug!(" gas used before refunds: {:?}", tx_gas_used_before_refunds);
@@ -351,6 +352,7 @@ where
             })
         })?;
         tracing::debug!("Gas used at last : {:?}", self.gas_used);
+        tracing::debug!("Gas spent at last : {:?}", self.gas_spent);
         Ok((
             self.evm,
             BlockExecutionResult {
