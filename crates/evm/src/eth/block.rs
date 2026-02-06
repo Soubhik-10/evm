@@ -204,7 +204,7 @@ where
             storages as u64,
             tx.tx().authorization_list().unwrap_or_default().len() as u64,
         );
-        tracing::debug!("Floor cost from gasparams{:?}", floor_cost);
+        tracing::debug!("Floor cost from gasparams {:?}", floor_cost);
         tracing::debug!("Floor cost from revm is : {:?}", gas);
 
         Ok(EthTxResult {
@@ -227,39 +227,54 @@ where
         tracing::debug!("Tx result : {:?}", result);
         self.system_caller.on_state(StateChangeSource::Transaction(self.receipts.len()), &state);
 
-        let gas_used = result.gas_used();
-        tracing::debug!("Transaction gas used: {:?}", gas_used);
+        // gas_used returned by revm is AFTER refunds
+        let gas_after_refund = result.gas_used();
+        tracing::debug!("Transaction gas after refund: {}", gas_after_refund);
 
-        // EIP-7778: Track gas accounting differently for Amsterdam
-        // - gas_used (for block accounting): gas before refunds
-        // - gas_spent (for user receipts): gas after refunds (what user pays)
+        // EIP-7778 (Amsterdam):
+        // - block gas accounting uses gas BEFORE refunds, floored
+        // - user pays gas AFTER refunds, floored (EIP-7623)
         let is_amsterdam = self
             .spec
             .is_amsterdam_active_at_timestamp(self.evm.block().timestamp().saturating_to());
 
         let (cumulative_gas_used, gas_spent) = if is_amsterdam {
-            // Get gas_refunded from the result (only Success variant has refunds)
+            // Refunds only exist for successful executions
             let gas_refunded = match &result {
                 ExecutionResult::Success { gas_refunded, .. } => *gas_refunded,
                 _ => 0,
             };
-            tracing::debug!(" gas refunded: {:?}", gas_refunded);
-            tracing::debug!("floor cost: {:?}", floor_cost);
-            // gas_used from result is already after refunds
-            let tx_gas_spent = gas_used;
-            let tx_gas_spent = max(tx_gas_spent, floor_cost.unwrap_or(0));
-            // gas before refunds = gas after refunds + refunded amount
-            let tx_gas_used_before_refunds = gas_used + gas_refunded;
-            tracing::debug!(" gas used before refunds: {:?}", tx_gas_used_before_refunds);
 
-            self.gas_used += max(tx_gas_used_before_refunds, floor_cost.unwrap_or(0));
+            let floor = floor_cost.unwrap_or(0);
+
+            tracing::debug!("Gas refunded: {}", gas_refunded);
+            tracing::debug!("Calldata floor cost: {}", floor);
+
+            // Gas before refunds (exec_gas)
+            let gas_before_refund = gas_after_refund + gas_refunded;
+            tracing::debug!("Gas before refund (exec_gas): {}", gas_before_refund);
+
+            // --- User pays (receipt gas) ---
+            // EIP-7623: max(calldata_floor, gas_after_refund)
+            let tx_gas_spent = max(gas_after_refund, floor);
+            tracing::debug!("User gas spent (post-refund, floored): {}", tx_gas_spent);
+
+            // --- Block accounting ---
+            // EIP-7778: max(calldata_floor, gas_before_refund)
+            let tx_block_gas_used = max(gas_before_refund, floor);
+            tracing::debug!("Block gas used for tx (pre-refund, floored): {}", tx_block_gas_used);
+
+            self.gas_used = self.gas_used.saturating_add(tx_block_gas_used);
+
             let cumulative_gas_spent = self.gas_spent.get_or_insert(0).saturating_add(tx_gas_spent);
-            *self.gas_spent.as_mut().unwrap() = cumulative_gas_spent;
 
+            *self.gas_spent.as_mut().unwrap() = cumulative_gas_spent;
+            tracing::debug!("Block gas limit :{:?}", self.evm().block().gas_limit());
             (self.gas_used, Some(cumulative_gas_spent))
         } else {
-            // Pre-Amsterdam: gas_used tracks gas after refunds
-            self.gas_used += gas_used;
+            // Pre-Amsterdam:
+            // - gas_used already includes refund semantics
+            self.gas_used = self.gas_used.saturating_add(gas_after_refund);
             (self.gas_used, None)
         };
 
@@ -284,7 +299,7 @@ where
         // Commit the state changes.
         self.evm.db_mut().commit(state);
 
-        Ok(gas_used)
+        Ok(gas_after_refund)
     }
 
     fn finish(
