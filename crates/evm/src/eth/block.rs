@@ -18,17 +18,18 @@ use crate::{
     Database, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded, RecoveredTx,
 };
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
-use alloy_consensus::{Header, Transaction, TransactionEnvelope, TxReceipt};
+use alloy_consensus::{Header, Transaction, TransactionEnvelope, TxReceipt, TxType};
 use alloy_eips::{
-    eip4895::Withdrawals, eip7623::tokens_in_calldata, eip7685::Requests, Encodable2718,
+    eip4895::Withdrawals, eip7623::tokens_in_calldata, eip7685::Requests, Encodable2718, Typed2718,
 };
 use alloy_hardforks::EthereumHardfork;
 use alloy_primitives::{Bytes, Log, B256};
 use revm::{
-    context::Block,
+    context::{transaction::AccessListItemTr, Block},
     context_interface::{cfg::GasParams, result::ResultAndState},
     database::{DatabaseCommitExt, State},
-    primitives::hardfork::SpecId::AMSTERDAM,
+    interpreter::gas::calculate_initial_tx_gas,
+    primitives::hardfork::SpecId::{self, AMSTERDAM},
     DatabaseCommit, Inspector,
 };
 
@@ -184,11 +185,33 @@ where
         let floor_cost =
             GasParams::new_spec(AMSTERDAM).tx_floor_cost(tokens_in_calldata(tx.tx().input()));
 
+        let mut accounts = 0;
+        let mut storages = 0;
+        if tx.tx().ty() != TxType::Legacy {
+            if let Some(access_list) = tx.tx().access_list() {
+                (accounts, storages) =
+                    access_list.iter().fold((0, 0), |(num_accounts, num_storage_slots), item| {
+                        (num_accounts + 1, num_storage_slots + item.storage_slots().count())
+                    });
+            }
+        }
+
+        let gas = calculate_initial_tx_gas(
+            SpecId::AMSTERDAM,
+            tx.tx().input(),
+            tx.tx().kind().is_create(),
+            accounts as u64,
+            storages as u64,
+            tx.tx().authorization_list().unwrap_or_default().len() as u64,
+        );
+        tracing::debug!("Floor cost from gasparams{:?}", floor_cost);
+        tracing::debug!("Floor cost from revm is : {:?}", gas);
+
         Ok(EthTxResult {
             result,
             blob_gas_used: tx.tx().blob_gas_used().unwrap_or_default(),
             tx_type: tx.tx().tx_type(),
-            floor_cost: Some(floor_cost),
+            floor_cost: Some(gas.floor_gas),
         })
     }
 
