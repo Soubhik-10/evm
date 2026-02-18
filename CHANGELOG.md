@@ -153,7 +153,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Bumps nonce of account ([#221](https://github.com/alloy-rs/evm/issues/221))
 - [evm] Moving rpc conversion traits from Reth ([#220](https://github.com/alloy-rs/evm/issues/220))
-- [evm] Add specializations for `Signed` types for `TxEnv`  ([#218](https://github.com/alloy-rs/evm/issues/218))
+- [evm] Add specializations for `Signed` types for `TxEnv` ([#218](https://github.com/alloy-rs/evm/issues/218))
 
 ### Miscellaneous Tasks
 
