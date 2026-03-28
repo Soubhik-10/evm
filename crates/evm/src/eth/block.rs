@@ -184,6 +184,13 @@ where
             }
             .into());
         }
+        tracing::debug!(
+            "Tx Signer: {:?}, Tx Nonce: {}, Tx Gas Limit: {}, Block Available Gas: {}",
+            tx.signer(),
+            tx.tx().nonce(),
+            tx.tx().gas_limit(),
+            block_available_gas,
+        );
 
         // Execute transaction and return the result
         let result = self.evm.transact(tx_env).map_err(|err| {
