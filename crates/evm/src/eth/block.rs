@@ -22,7 +22,7 @@ use alloy_hardforks::EthereumHardfork;
 use alloy_primitives::{Bytes, Log, B256};
 use revm::{
     context::Block, context_interface::result::ResultAndState, database::DatabaseCommitExt,
-    DatabaseCommit, Inspector,
+    Database, DatabaseCommit, Inspector,
 };
 
 /// Context for Ethereum block execution.
@@ -175,6 +175,9 @@ where
         } else {
             self.cumulative_tx_gas_used
         };
+        tracing::info!("block gas used before tx: {}", block_gas_used);
+        tracing::info!("tx gas limit: {}", tx.tx().gas_limit());
+        tracing::info!("max block gas used:{:}", self.max_block_gas_used());
         let block_available_gas = self.evm.block().gas_limit() - block_gas_used;
 
         if tx.tx().gas_limit() > block_available_gas {
@@ -184,12 +187,16 @@ where
             }
             .into());
         }
-        tracing::debug!(
+        tracing::info!(
             "Tx Signer: {:?}, Tx Nonce: {}, Tx Gas Limit: {}, Block Available Gas: {}",
             tx.signer(),
             tx.tx().nonce(),
             tx.tx().gas_limit(),
             block_available_gas,
+        );
+        tracing::info!(
+            "pre balance of tx sender: {}",
+            self.evm.db_mut().basic(*tx.signer()).map(|b| b.unwrap().balance).unwrap_or_default()
         );
 
         // Execute transaction and return the result
@@ -197,6 +204,10 @@ where
             let hash = tx.tx().trie_hash();
             BlockExecutionError::evm(err, hash)
         })?;
+        tracing::info!(
+            "post balance of tx sender: {}",
+            self.evm.db_mut().basic(*tx.signer()).map(|b| b.unwrap().balance).unwrap_or_default()
+        );
         Ok(EthTxResult {
             result,
             blob_gas_used: tx.tx().blob_gas_used().unwrap_or_default(),
@@ -219,10 +230,18 @@ where
         let regular_gas_used = result.gas().block_regular_gas_used();
         let state_gas_used = result.gas().block_state_gas_used();
 
+        tracing::info!("gas used by tx: {}", tx_gas_used);
+        tracing::info!("regular gas used by tx: {}", regular_gas_used);
+        tracing::info!("state gas used by tx: {}", state_gas_used);
+
         // append used gas used
         self.block_regular_gas_used += regular_gas_used;
         self.block_state_gas_used += state_gas_used;
         self.cumulative_tx_gas_used += tx_gas_used;
+
+        tracing::info!("cumulative tx gas used: {}", self.cumulative_tx_gas_used);
+        tracing::info!("block regular gas used: {}", self.block_regular_gas_used);
+        tracing::info!("block state gas used: {}", self.block_state_gas_used);
 
         // only determine cancun fields when active
         if self.spec.is_cancun_active_at_timestamp(self.evm.block().timestamp().saturating_to()) {
@@ -240,6 +259,8 @@ where
 
         // Commit the state changes.
         self.evm.db_mut().commit(state);
+        tracing::info!("tx gas used (after refunds): {}", tx_gas_used);
+        tracing::info!("state gas used by tx: {}", state_gas_used);
 
         Ok(GasOutput::with_state_gas(tx_gas_used, state_gas_used))
     }
@@ -317,7 +338,8 @@ where
         } else {
             self.cumulative_tx_gas_used
         };
-
+        tracing::info!("gas used by block: {}", gas_used);
+        tracing::info!("max gas used by block: {}", self.max_block_gas_used());
         Ok((
             self.evm,
             BlockExecutionResult {
