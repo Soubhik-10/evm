@@ -313,6 +313,7 @@ where
             *balance_increments.entry(dao_fork::DAO_HARDFORK_BENEFICIARY).or_default() +=
                 drained_balance;
         }
+        tracing::info!("balance increments to apply: {balance_increments:#?}");
         // increment balances
         self.evm
             .db_mut()
