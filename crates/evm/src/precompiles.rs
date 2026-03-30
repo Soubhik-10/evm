@@ -688,6 +688,12 @@ impl PrecompileOutputExt {
         gas_limit: u64,
         reservoir: u64,
     ) -> Self {
+        tracing::info!(
+            "Precompile output: gas used = {}, gas remaining = {}, reservoir remaining = {}",
+            output.gas_used,
+            gas_limit - output.gas_used,
+            reservoir
+        );
         Self {
             gas: GasTracker::new(gas_limit, gas_limit - output.gas_used, reservoir),
             reverted: false,
