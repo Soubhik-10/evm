@@ -1009,7 +1009,9 @@ impl Precompile for DynPrecompile {
     }
 
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResultExt {
-        self.0.call(input)
+        let x = self.0.call(input);
+        tracing::info!("precompile in evm {:?}", x);
+        x
     }
 
     fn supports_caching(&self) -> bool {
