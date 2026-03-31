@@ -935,7 +935,9 @@ impl Precompile for revm::precompile::Precompile {
     }
 
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResultExt {
-        match self.precompile()(input.data, input.gas) {
+        let precompile_ref = self.precompile()(input.data, input.gas);
+        tracing::info!("prcompile {:?} returned {:?}", self.id(), precompile_ref);
+        match precompile_ref {
             Ok(output) => {
                 Ok(PrecompileOutputExt::from_precompile_output(output, input.gas, input.reservoir))
             }
