@@ -596,6 +596,11 @@ where
                 if error.is_fatal() {
                     return Err(error.into_fatal());
                 }
+                tracing::warn!(
+                    "Precompile error at address {}: {}",
+                    inputs.bytecode_address,
+                    error
+                );
                 *result.gas.tracker_mut() = error.gas_tracker;
                 result.result = if error.precompile_error.is_oog() {
                     InstructionResult::PrecompileOOG
