@@ -204,7 +204,7 @@ where
             let hash = tx.tx().trie_hash();
             BlockExecutionError::evm(err, hash)
         })?;
-        tracing::info!("result from evm: {:?}", result);
+        tracing::info!("result from evm: {:?}", result.result);
         // tracing::info!(
         //     "post balance of tx sender: {}",
         //     self.evm.db_mut().basic(*tx.signer()).map(|b| b.unwrap().balance).unwrap_or_default()
