@@ -22,7 +22,7 @@ use alloy_hardforks::EthereumHardfork;
 use alloy_primitives::{Bytes, Log, B256};
 use revm::{
     context::Block, context_interface::result::ResultAndState, database::DatabaseCommitExt,
-    Database, DatabaseCommit, Inspector,
+    DatabaseCommit, Inspector,
 };
 
 /// Context for Ethereum block execution.
@@ -167,26 +167,30 @@ where
         //
         // Amsterdam+: use max(block_regular_gas_used, block_state_gas_used) which tracks
         // gas without refunds, as required by EIP-8037 dual-limit accounting.
-        let block_gas_used = if self
+        let is_amsterdam = self
             .spec
-            .is_amsterdam_active_at_timestamp(self.evm.block().timestamp().saturating_to())
-        {
-            self.max_block_gas_used()
-        } else {
-            self.cumulative_tx_gas_used
-        };
+            .is_amsterdam_active_at_timestamp(self.evm.block().timestamp().saturating_to());
+
+        let block_gas_used =
+            if is_amsterdam { self.max_block_gas_used() } else { self.cumulative_tx_gas_used };
+
         tracing::info!("block gas used before tx: {}", block_gas_used);
         tracing::info!("tx gas limit: {}", tx.tx().gas_limit());
         tracing::info!("max block gas used:{:}", self.max_block_gas_used());
+
         let block_available_gas = self.evm.block().gas_limit() - block_gas_used;
 
-        if tx.tx().gas_limit() > block_available_gas {
-            return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                transaction_gas_limit: tx.tx().gas_limit(),
-                block_available_gas,
+        // ✅ ONLY apply this rule pre-Amsterdam
+        if !is_amsterdam {
+            if tx.tx().gas_limit() > block_available_gas {
+                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit: tx.tx().gas_limit(),
+                    block_available_gas,
+                }
+                .into());
             }
-            .into());
         }
+
         tracing::info!(
             "Tx Signer: {:?}, Tx Nonce: {}, Tx Gas Limit: {}, Block Available Gas: {}",
             tx.signer(),
@@ -194,16 +198,13 @@ where
             tx.tx().gas_limit(),
             block_available_gas,
         );
-        // tracing::info!(
-        //     "pre balance of tx sender: {}",
-        //     self.evm.db_mut().basic(*tx.signer()).map(|b| b.unwrap().balance).unwrap_or_default()
-        // );
 
         // Execute transaction and return the result
         let result = self.evm.transact(tx_env).map_err(|err| {
             let hash = tx.tx().trie_hash();
             BlockExecutionError::evm(err, hash)
         })?;
+
         tracing::info!("result from evm: {:?}", result.result);
         // tracing::info!(
         //     "post balance of tx sender: {}",
@@ -243,6 +244,19 @@ where
         tracing::info!("cumulative tx gas used: {}", self.cumulative_tx_gas_used);
         tracing::info!("block regular gas used: {}", self.block_regular_gas_used);
         tracing::info!("block state gas used: {}", self.block_state_gas_used);
+
+        let block_limit = self.evm.block().gas_limit();
+
+        if self.block_regular_gas_used > block_limit || self.block_state_gas_used > block_limit {
+            tracing::error!(
+                "Block gas exceeded! regular: {}, state: {}, limit: {}",
+                self.block_regular_gas_used,
+                self.block_state_gas_used,
+                block_limit
+            );
+
+            return Err(BlockValidationError::BlockGasExceeded.into());
+        }
 
         // only determine cancun fields when active
         if self.spec.is_cancun_active_at_timestamp(self.evm.block().timestamp().saturating_to()) {
