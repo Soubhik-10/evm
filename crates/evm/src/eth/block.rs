@@ -21,9 +21,13 @@ use alloy_eips::{eip4895::Withdrawal, eip7685::Requests, Encodable2718};
 use alloy_hardforks::EthereumHardfork;
 use alloy_primitives::{Bytes, Log, B256};
 use revm::{
-    context::Block, context_interface::result::ResultAndState, database::DatabaseCommitExt,
+    context::{result::min, Block},
+    context_interface::result::ResultAndState,
+    database::DatabaseCommitExt,
     DatabaseCommit, Inspector,
 };
+
+const TX_MAX_GAS_LIMIT: u64 = 16777216;
 
 /// Context for Ethereum block execution.
 #[derive(Debug, Clone)]
@@ -172,7 +176,7 @@ where
             .is_amsterdam_active_at_timestamp(self.evm.block().timestamp().saturating_to());
 
         let block_gas_used =
-            if is_amsterdam { self.max_block_gas_used() } else { self.cumulative_tx_gas_used };
+            if is_amsterdam { self.block_regular_gas_used } else { self.cumulative_tx_gas_used };
 
         tracing::info!("block gas used before tx: {}", block_gas_used);
         tracing::info!("cumulative tx gas used: {}", self.cumulative_tx_gas_used);
@@ -181,15 +185,12 @@ where
 
         let block_available_gas = self.evm.block().gas_limit() - block_gas_used;
 
-        // ✅ ONLY apply this rule pre-Amsterdam
-        if !is_amsterdam {
-            if tx.tx().gas_limit() > block_available_gas {
-                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: tx.tx().gas_limit(),
-                    block_available_gas,
-                }
-                .into());
+        if min(tx.tx().gas_limit(), TX_MAX_GAS_LIMIT) > block_available_gas {
+            return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                transaction_gas_limit: tx.tx().gas_limit(),
+                block_available_gas,
             }
+            .into());
         }
 
         tracing::info!(
