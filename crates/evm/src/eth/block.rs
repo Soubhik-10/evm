@@ -175,6 +175,7 @@ where
             if is_amsterdam { self.max_block_gas_used() } else { self.cumulative_tx_gas_used };
 
         tracing::info!("block gas used before tx: {}", block_gas_used);
+        tracing::info!("cumulative tx gas used: {}", self.cumulative_tx_gas_used);
         tracing::info!("tx gas limit: {}", tx.tx().gas_limit());
         tracing::info!("max block gas used:{:}", self.max_block_gas_used());
 
