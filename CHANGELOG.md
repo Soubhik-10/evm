@@ -5,11 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0](https://github.com/alloy-rs/evm/releases/tag/v0.32.0) - 2026-04-14
+
+### Dependencies
+
+- Revm state-gas integration ([#286](https://github.com/alloy-rs/evm/issues/286))
+
+### Miscellaneous Tasks
+
+- [BAL] Added slotnum changes  for glam ([#338](https://github.com/alloy-rs/evm/issues/338))
+
+## [0.31.0](https://github.com/alloy-rs/evm/releases/tag/v0.31.0) - 2026-04-13
+
+### Dependencies
+
+- Bump alloy to 2.0.0 ([#334](https://github.com/alloy-rs/evm/issues/334))
+
+### Documentation
+
+- Improve state hook source docs and add Other variants ([#325](https://github.com/alloy-rs/evm/issues/325))
+
+### Miscellaneous Tasks
+
+- Release 0.31.0
+
+### Refactor
+
+- Expose full `Self::Result` in the executor closures ([#335](https://github.com/alloy-rs/evm/issues/335))
+
+## [0.30.0](https://github.com/alloy-rs/evm/releases/tag/v0.30.0) - 2026-03-30
+
+### Dependencies
+
+- Remove op-revm/op-alloy dependencies ([#312](https://github.com/alloy-rs/evm/issues/312))
+
+### Features
+
+- [evm] Add TransactionEnvMut trait ([#320](https://github.com/alloy-rs/evm/issues/320))
+- Add `TxResult::into_result` ([#317](https://github.com/alloy-rs/evm/issues/317))
+- Add EVM error accessors and downcast helpers ([#311](https://github.com/alloy-rs/evm/issues/311))
+- Add TxEnv to EvmInternals ([#168](https://github.com/alloy-rs/evm/issues/168))
+
+### Miscellaneous Tasks
+
+- Release 0.30.0
+
 ## [0.29.2](https://github.com/alloy-rs/evm/releases/tag/v0.29.2) - 2026-03-04
 
 ### Dependencies
 
 - Bump revm 36 ([#307](https://github.com/alloy-rs/evm/issues/307))
+
+### Miscellaneous Tasks
+
+- Release 0.29.2
 
 ## [0.29.1](https://github.com/alloy-rs/evm/releases/tag/v0.29.1) - 2026-03-04
 
