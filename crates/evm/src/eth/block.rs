@@ -166,18 +166,40 @@ where
         //
         // Amsterdam+: use block_regular_gas_used.
         let block_gas_used = if self.evm.cfg_env().enable_amsterdam_eip8037 {
+            tracing::info!(
+                "block_regular_gas_used: {}, cumulative_tx_gas_used: {}",
+                self.block_regular_gas_used,
+                self.cumulative_tx_gas_used
+            );
             self.block_regular_gas_used
         } else {
             self.cumulative_tx_gas_used
         };
+        tracing::info!(
+            "block_gas_used: {}, block_gas_limit: {}",
+            block_gas_used,
+            self.evm.block().gas_limit()
+        );
         let block_available_gas = self.evm.block().gas_limit() - block_gas_used;
+
+        tracing::info!(
+            "transaction_gas_limit: {}, block_available_gas: {}",
+            tx.tx().gas_limit(),
+            block_available_gas
+        );
 
         // Use regular part of transaction gas limit to check if it fits inside available block
         // space.
         let mut max_tx_gas_usage = tx.tx().gas_limit();
+        tracing::info!("initial max_tx_gas_usage: {}", max_tx_gas_usage);
         if let Some(tx_gas_limit_cap) = self.evm.cfg_env().tx_gas_limit_cap {
             max_tx_gas_usage = min(max_tx_gas_usage, tx_gas_limit_cap);
         }
+        tracing::info!(
+            "capped max_tx_gas_usage: {}, tx_gas_limit_cap: {:?}",
+            max_tx_gas_usage,
+            self.evm.cfg_env().tx_gas_limit_cap
+        );
 
         if max_tx_gas_usage > block_available_gas {
             return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
@@ -213,10 +235,23 @@ where
         let regular_gas_used = result.gas().block_regular_gas_used();
         let state_gas_used = result.gas().block_state_gas_used();
 
+        tracing::info!(
+            "tx_gas_used: {}, regular_gas_used: {}, state_gas_used: {}",
+            tx_gas_used,
+            regular_gas_used,
+            state_gas_used
+        );
+
         // append used gas used
         self.block_regular_gas_used += regular_gas_used;
         self.block_state_gas_used += state_gas_used;
         self.cumulative_tx_gas_used += tx_gas_used;
+
+        tracing::info!(
+            "block_regular_gas_used: {}, block_state_gas_used: {}",
+            self.block_regular_gas_used,
+            self.block_state_gas_used
+        );
 
         // only determine cancun fields when active
         if self.spec.is_cancun_active_at_timestamp(self.evm.block().timestamp().saturating_to()) {
@@ -305,6 +340,11 @@ where
         // Pre-Amsterdam: use tx_gas_used (with refunds) for the block gas total.
         // Amsterdam+: use max(regular, state) gas without refunds (EIP-8037).
         let gas_used = if self.evm.cfg_env().enable_amsterdam_eip8037 {
+            tracing::info!(
+                "block_regular_gas_used: {}, block_state_gas_used: {}",
+                self.block_regular_gas_used,
+                self.block_state_gas_used
+            );
             self.max_block_gas_used()
         } else {
             self.cumulative_tx_gas_used
