@@ -215,6 +215,9 @@ where
             BlockExecutionError::evm(err, hash)
         })?;
 
+        tracing::info!("Tx signer:{:?}", tx.signer());
+        tracing::info!("tx to:{:?}", tx.tx().to());
+
         Ok(EthTxResult {
             result,
             blob_gas_used: tx.tx().blob_gas_used().unwrap_or_default(),
