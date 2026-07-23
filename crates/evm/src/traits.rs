@@ -10,6 +10,7 @@ use revm::{
             account::JournaledAccountTr, JournalCheckpoint, JournalLoadError, TransferError,
         },
         result::InvalidTransaction,
+        transaction::FrameTransaction,
         Cfg, ContextTr, DBErrorMarker, JournalTr,
     },
     interpreter::{SStoreResult, StateLoad},
@@ -57,6 +58,9 @@ pub trait TransactionTr: Any {
     ///
     /// Depending on this field other functions should be called.
     fn tx_type(&self) -> u8;
+
+    /// Returns the EIP-8141 frame transaction payload, if this is a frame transaction.
+    fn frame_transaction(&self) -> Option<&FrameTransaction>;
 
     /// Caller aka Author aka transaction signer.
     ///
@@ -169,6 +173,10 @@ where
 {
     fn tx_type(&self) -> u8 {
         revm::context::Transaction::tx_type(self)
+    }
+
+    fn frame_transaction(&self) -> Option<&FrameTransaction> {
+        revm::context::Transaction::frame_transaction(self)
     }
 
     fn caller(&self) -> Address {

@@ -1,8 +1,9 @@
 use crate::{
     env::BlockEnvironment,
     rpc::{CallFees, CallFeesError},
-    EvmEnv,
+    EvmEnv, FromRecoveredTx,
 };
+use alloy_consensus::{TxEip8141, TxType};
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::request::{TransactionInputError, TransactionRequest};
 use core::fmt::Debug;
@@ -63,9 +64,15 @@ impl<Spec, Block: BlockEnvironment> TryIntoTxEnv<TxEnv, Spec, Block> for Transac
             blob_versioned_hashes,
             max_fee_per_blob_gas,
             authorization_list,
+            frames,
+            signatures,
             transaction_type: _,
             sidecar: _,
         } = self;
+
+        let requested_max_fee_per_gas = max_fee_per_gas;
+        let requested_max_priority_fee_per_gas = max_priority_fee_per_gas;
+        let requested_max_fee_per_blob_gas = max_fee_per_blob_gas;
 
         let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
             CallFees::ensure_fees(
@@ -93,6 +100,24 @@ impl<Spec, Block: BlockEnvironment> TryIntoTxEnv<TxEnv, Spec, Block> for Transac
 
         let nonce = nonce.unwrap_or_default();
 
+        if tx_type == TxType::Eip8141 as u8 {
+            let tx = TxEip8141 {
+                chain_id,
+                nonce,
+                sender: caller,
+                frames: frames.unwrap_or_default(),
+                signatures: signatures.unwrap_or_default(),
+                max_priority_fee_per_gas: requested_max_priority_fee_per_gas.unwrap_or_default(),
+                max_fee_per_gas: requested_max_fee_per_gas
+                    .map(U256::from)
+                    .unwrap_or(gas_price)
+                    .saturating_to(),
+                max_fee_per_blob_gas: requested_max_fee_per_blob_gas.unwrap_or_default(),
+                blob_versioned_hashes: blob_versioned_hashes.unwrap_or_default(),
+            };
+            return Ok(TxEnv::from_recovered_tx(&tx, caller));
+        }
+
         let env = TxEnv {
             tx_type,
             gas_limit,
@@ -116,6 +141,7 @@ impl<Spec, Block: BlockEnvironment> TryIntoTxEnv<TxEnv, Spec, Block> for Transac
                 .into_iter()
                 .map(Either::Left)
                 .collect(),
+            frame_transaction: None,
         };
 
         Ok(env)

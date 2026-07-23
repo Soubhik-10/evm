@@ -7,15 +7,18 @@
 use alloc::sync::Arc;
 use alloy_consensus::{
     crypto::secp256k1, transaction::Recovered, EthereumTxEnvelope, Signed, TxEip1559, TxEip2930,
-    TxEip4844, TxEip4844Variant, TxEip7702, TxLegacy,
+    TxEip4844, TxEip4844Variant, TxEip7702, TxEip8141, TxLegacy,
 };
 use alloy_eips::{
     eip2718::WithEncoded,
     eip7702::{RecoveredAuthority, RecoveredAuthorization},
     Typed2718,
 };
-use alloy_primitives::{Address, Bytes, TxKind};
-use revm::{context::TxEnv, context_interface::either::Either};
+use alloy_primitives::{Address, Bytes, TxKind, U256};
+use revm::{
+    context::TxEnv,
+    context_interface::{either::Either, transaction::FrameTransaction},
+};
 
 /// Trait marking types that can be converted into a transaction environment.
 ///
@@ -91,8 +94,8 @@ where
 /// # Implementation
 ///
 /// This trait is implemented for all standard Ethereum transaction types ([`TxLegacy`],
-/// [`TxEip2930`], [`TxEip1559`], [`TxEip4844`], [`TxEip7702`]) and transaction envelopes
-/// ([`EthereumTxEnvelope`]).
+/// [`TxEip2930`], [`TxEip1559`], [`TxEip4844`], [`TxEip7702`], [`TxEip8141`]) and
+/// transaction envelopes ([`EthereumTxEnvelope`]).
 ///
 /// # Example
 ///
@@ -348,6 +351,42 @@ impl FromTxWithEncoded<TxEip7702> for TxEnv {
     }
 }
 
+impl FromRecoveredTx<TxEip8141> for TxEnv {
+    fn from_recovered_tx(tx: &TxEip8141, _sender: Address) -> Self {
+        // EIP-8141 has no outer ECDSA signature. Its consensus sender is an explicit field, so the
+        // synthetic signer carried by `Recovered` must not be allowed to override it.
+        let frame_transaction = FrameTransaction {
+            frames: tx.frames.clone(),
+            signatures: tx.signatures.clone(),
+            signature_hash: tx.signature_hash(),
+        };
+        let gas_limit = frame_transaction.gas_limit().unwrap_or(u64::MAX);
+
+        Self {
+            tx_type: tx.ty(),
+            caller: tx.sender,
+            gas_limit,
+            gas_price: tx.max_fee_per_gas,
+            kind: TxKind::Call(tx.sender),
+            value: U256::ZERO,
+            data: Bytes::new(),
+            nonce: tx.nonce,
+            chain_id: Some(tx.chain_id),
+            gas_priority_fee: Some(tx.max_priority_fee_per_gas),
+            blob_hashes: tx.blob_versioned_hashes.clone(),
+            max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
+            frame_transaction: Some(frame_transaction),
+            ..Default::default()
+        }
+    }
+}
+
+impl FromTxWithEncoded<TxEip8141> for TxEnv {
+    fn from_encoded_tx(tx: &TxEip8141, sender: Address, _encoded: Bytes) -> Self {
+        Self::from_recovered_tx(tx, sender)
+    }
+}
+
 /// Helper trait to abstract over different [`Recovered<T>`] implementations.
 ///
 /// Implemented for [`Recovered<T>`], `Recovered<&T>`, `&Recovered<T>`, `&Recovered<&T>`
@@ -497,6 +536,7 @@ impl<Eip4844: AsRef<TxEip4844>> FromTxWithEncoded<EthereumTxEnvelope<Eip4844>> f
                 Self::from_encoded_tx(tx.tx().as_ref(), caller, encoded)
             }
             EthereumTxEnvelope::Eip7702(tx) => Self::from_encoded_tx(tx.tx(), caller, encoded),
+            EthereumTxEnvelope::Eip8141(tx) => Self::from_encoded_tx(tx.inner(), caller, encoded),
         }
     }
 }
@@ -509,6 +549,7 @@ impl<Eip4844: AsRef<TxEip4844>> FromRecoveredTx<EthereumTxEnvelope<Eip4844>> for
             EthereumTxEnvelope::Eip2930(tx) => Self::from_recovered_tx(tx.tx(), sender),
             EthereumTxEnvelope::Eip4844(tx) => Self::from_recovered_tx(tx.tx().as_ref(), sender),
             EthereumTxEnvelope::Eip7702(tx) => Self::from_recovered_tx(tx.tx(), sender),
+            EthereumTxEnvelope::Eip8141(tx) => Self::from_recovered_tx(tx.inner(), sender),
         }
     }
 }
@@ -516,6 +557,8 @@ impl<Eip4844: AsRef<TxEip4844>> FromRecoveredTx<EthereumTxEnvelope<Eip4844>> for
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip8141::{Frame, FrameMode, FrameSignature, SignatureScheme};
+    use alloy_primitives::{address, b256, Sealable, U256};
 
     struct MyTxEnv;
     struct MyTransaction;
@@ -555,5 +598,49 @@ mod tests {
 
         assert_recoverable::<Recovered<MyTransaction>>();
         assert_recoverable::<WithEncoded<Recovered<MyTransaction>>>();
+    }
+
+    #[test]
+    fn converts_eip8141_into_canonical_tx_env() {
+        let sender = address!("0000000000000000000000000000000000000001");
+        let blob_hash = b256!("0100000000000000000000000000000000000000000000000000000000000001");
+        let tx = TxEip8141 {
+            chain_id: 1,
+            nonce: 7,
+            sender,
+            frames: vec![Frame {
+                mode: FrameMode::Default,
+                gas_limit: 100,
+                value: U256::from(3),
+                ..Default::default()
+            }],
+            signatures: vec![FrameSignature {
+                scheme: SignatureScheme::Arbitrary,
+                ..Default::default()
+            }],
+            max_priority_fee_per_gas: 2,
+            max_fee_per_gas: 10,
+            max_fee_per_blob_gas: 4,
+            blob_versioned_hashes: vec![blob_hash],
+        };
+        let signature_hash = tx.signature_hash();
+
+        let envelope = EthereumTxEnvelope::<TxEip4844>::Eip8141(tx.clone().seal_slow());
+        let env = TxEnv::from_recovered_tx(&envelope, Address::ZERO);
+        let frame_transaction = env.frame_transaction.as_ref().expect("frame transaction");
+
+        assert_eq!(env.tx_type, tx.ty());
+        assert_eq!(env.caller, sender);
+        assert_eq!(env.kind, TxKind::Call(sender));
+        assert_eq!(env.nonce, tx.nonce);
+        assert_eq!(env.chain_id, Some(tx.chain_id));
+        assert_eq!(env.gas_price, tx.max_fee_per_gas);
+        assert_eq!(env.gas_priority_fee, Some(tx.max_priority_fee_per_gas));
+        assert_eq!(env.blob_hashes, tx.blob_versioned_hashes);
+        assert_eq!(env.max_fee_per_blob_gas, tx.max_fee_per_blob_gas);
+        assert_eq!(env.gas_limit, frame_transaction.gas_limit().unwrap());
+        assert_eq!(frame_transaction.signature_hash, signature_hash);
+        assert_eq!(frame_transaction.frames, tx.frames);
+        assert_eq!(frame_transaction.signatures, tx.signatures);
     }
 }
