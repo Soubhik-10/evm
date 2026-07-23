@@ -22,7 +22,11 @@ where
     C: EthereumHardforks,
 {
     if chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
-        SpecId::AMSTERDAM
+        // EIP-8141 is implemented on top of the Amsterdam execution-specs branch. REVM keeps
+        // the experimental frame-transaction rules in the subsequent Bogota spec so that they
+        // do not leak into unpatched consumers; this EIP-8141 integration branch opts into them
+        // when Amsterdam is active.
+        SpecId::BOGOTA
     } else if chain_spec.is_osaka_active_at_timestamp(timestamp) {
         SpecId::OSAKA
     } else if chain_spec.is_prague_active_at_timestamp(timestamp) {
@@ -149,7 +153,7 @@ mod tests {
     }
 
     #[test_case::test_case(FakeHardfork::osaka(), SpecId::OSAKA; "Osaka")]
-    #[test_case::test_case(FakeHardfork::amsterdam(), SpecId::AMSTERDAM; "Amsterdam")]
+    #[test_case::test_case(FakeHardfork::amsterdam(), SpecId::BOGOTA; "Amsterdam with EIP-8141")]
     #[test_case::test_case(FakeHardfork::prague(), SpecId::PRAGUE; "Prague")]
     #[test_case::test_case(FakeHardfork::cancun(), SpecId::CANCUN; "Cancun")]
     #[test_case::test_case(FakeHardfork::shanghai(), SpecId::SHANGHAI; "Shanghai")]
