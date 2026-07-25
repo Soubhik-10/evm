@@ -44,7 +44,7 @@ alloy-eips = { version = "2.0.0", default-features = false }
 alloy-consensus = { version = "2.0.0", default-features = false }
 alloy-primitives = { version = "1.0.0", default-features = false }
 alloy-sol-types = { version = "1.0.0", default-features = false }
-alloy-hardforks = { version = "0.4.7" }
+alloy-hardforks = { git = "https://github.com/alloy-rs/hardforks", rev = "5aece346b3c549a259de50f47e39373561f17b53" }
 alloy-rpc-types-eth = { version = "2.0.0", default-features = false }
 alloy-rpc-types-engine = { version = "2.0.0", default-features = false }
 
