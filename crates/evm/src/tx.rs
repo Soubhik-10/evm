@@ -557,7 +557,7 @@ impl<Eip4844: AsRef<TxEip4844>> FromRecoveredTx<EthereumTxEnvelope<Eip4844>> for
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip8141::{Frame, FrameMode, FrameSignature, SignatureScheme};
+    use alloy_eips::eip8141::{Frame, FrameLimits, FrameMode, FrameSignature, SignatureScheme};
     use alloy_primitives::{address, b256, Sealable, U256};
 
     struct MyTxEnv;
@@ -610,7 +610,7 @@ mod tests {
             sender,
             frames: vec![Frame {
                 mode: FrameMode::Default,
-                gas_limit: 100,
+                limits: FrameLimits { execution: 100, state: 0 },
                 value: U256::from(3),
                 ..Default::default()
             }],
