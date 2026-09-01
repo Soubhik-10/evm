@@ -361,7 +361,7 @@ impl FromRecoveredTx<TxEip8141> for TxEnv {
             signature_hash: tx.signature_hash(),
             max_fee_per_gas: tx.fees.max_fee_per_gas,
         };
-        let gas_limit = frame_transaction.gas_limit().unwrap_or(u64::MAX);
+        let gas_limit = frame_transaction.gas_limit(tx.sender).unwrap_or(u64::MAX);
 
         Self {
             tx_type: tx.ty(),
@@ -643,7 +643,7 @@ mod tests {
         assert_eq!(env.gas_priority_fee, Some(tx.fees.max_priority_fee_per_gas.saturating_to()));
         assert_eq!(env.blob_hashes, tx.blob_versioned_hashes);
         assert_eq!(env.max_fee_per_blob_gas, tx.fees.max_fee_per_blob_gas.saturating_to());
-        assert_eq!(env.gas_limit, frame_transaction.gas_limit().unwrap());
+        assert_eq!(env.gas_limit, frame_transaction.gas_limit(sender).unwrap());
         assert_eq!(frame_transaction.signature_hash, signature_hash);
         assert_eq!(frame_transaction.max_fee_per_gas, tx.fees.max_fee_per_gas);
         assert_eq!(frame_transaction.frames, tx.frames);
