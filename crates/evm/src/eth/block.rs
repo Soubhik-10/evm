@@ -22,8 +22,8 @@ use alloy_eips::{eip4895::Withdrawal, eip7685::Requests, Encodable2718};
 use alloy_hardforks::EthereumHardfork;
 use alloy_primitives::{Bytes, Log, B256};
 use revm::{
-    context::Block,
-    context_interface::{result::ResultAndState, Cfg},
+    context::{Block, Transaction as RevmTransaction},
+    context_interface::{cfg::GasParams, result::ResultAndState, Cfg},
     database::DatabaseCommitExt,
     primitives::hardfork::SpecId,
     DatabaseCommit, Inspector,
@@ -99,6 +99,36 @@ pub struct EthTxResult<H, T> {
     pub tx_type: T,
 }
 
+/// Returns the execution and state gas reservations used for block admission.
+///
+/// Frame transactions reserve each gas dimension independently. Their execution reservation is
+/// the larger of the intrinsic execution cost plus the frame execution grants and the calldata
+/// floor; their state reservation is the sum of the frame state-gas limits. Standard transactions
+/// retain the legacy single-limit behavior.
+#[inline]
+pub fn transaction_gas_reservation<T: RevmTransaction>(
+    tx: &T,
+    gas_params: &GasParams,
+    tx_gas_limit_cap: u64,
+) -> (u64, u64) {
+    let Some(frame_tx) = tx.frame_transaction() else {
+        let gas_limit = tx.gas_limit();
+        return (min(gas_limit, tx_gas_limit_cap), gas_limit);
+    };
+
+    let sender = tx.caller();
+    let execution_reservation = (|| {
+        let intrinsic = frame_tx.intrinsic_gas_with_params(sender, gas_params)?;
+        let frame_execution = frame_tx.total_frame_execution_gas_limit()?;
+        let calldata_floor = frame_tx.calldata_floor_gas_with_params(sender, gas_params)?;
+        Some(intrinsic.checked_add(frame_execution)?.max(calldata_floor))
+    })()
+    .unwrap_or(u64::MAX);
+    let state_reservation = frame_tx.total_frame_state_gas_limit().unwrap_or(u64::MAX);
+
+    (execution_reservation, state_reservation)
+}
+
 impl<H, T> TxResult for EthTxResult<H, T>
 where
     H: Send + 'static,
@@ -170,6 +200,7 @@ where
         Spec: Into<SpecId> + Clone,
         Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
     >,
+    E::Tx: RevmTransaction,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt<Log = Log>>,
     <R::Transaction as TransactionEnvelope>::TxType: Send + 'static,
@@ -209,25 +240,28 @@ where
 
         // Use regular part of transaction gas limit to check if it fits inside available block
         // space.
-        let max_tx_gas_usage = min(tx.tx().gas_limit(), self.evm.cfg_env().tx_gas_limit_cap());
+        let tx_gas_limit = tx.tx().gas_limit();
+        let (max_tx_gas_usage, state_gas_reservation) = transaction_gas_reservation(
+            &tx_env,
+            self.evm.cfg_env().gas_params(),
+            self.evm.cfg_env().tx_gas_limit_cap(),
+        );
 
         if max_tx_gas_usage > block_available_gas {
             return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                transaction_gas_limit: tx.tx().gas_limit(),
+                transaction_gas_limit: tx_gas_limit,
                 block_available_gas,
             }
             .into());
         }
 
-        // Amsterdam+: the state-gas dimension has its own budget of `block_gas_limit`
-        // (execution-specs `check_block_gas_capacity`). Unlike the execution dimension,
-        // the transaction's full gas limit counts against it — state gas is drawn from
-        // the reservoir above `tx_gas_limit_cap`, so the cap does not bound it.
+        // Amsterdam+: frame transactions use an explicit state-gas reservation, while standard
+        // transactions retain the full transaction gas limit for this dimension.
         if self.evm.cfg_env().enable_amsterdam_eip8037 && !self.skip_state_gas_capacity_check {
             let state_gas_available = self.evm.block().gas_limit() - self.block_state_gas_used;
-            if tx.tx().gas_limit() > state_gas_available {
+            if state_gas_reservation > state_gas_available {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: tx.tx().gas_limit(),
+                    transaction_gas_limit: tx_gas_limit,
                     block_available_gas: state_gas_available,
                 }
                 .into());
@@ -412,6 +446,7 @@ where
         Spec: Into<SpecId> + Clone,
         Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
     >,
+    EvmF::Tx: RevmTransaction,
     <R::Transaction as TransactionEnvelope>::TxType: Send + 'static,
     Self: 'static,
 {
