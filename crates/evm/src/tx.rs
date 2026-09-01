@@ -359,7 +359,7 @@ impl FromRecoveredTx<TxEip8141> for TxEnv {
             frames: tx.frames.clone(),
             signatures: tx.signatures.clone(),
             signature_hash: tx.signature_hash(),
-            max_fee_per_gas: tx.max_fee_per_gas,
+            max_fee_per_gas: tx.fees.max_fee_per_gas,
         };
         let gas_limit = frame_transaction.gas_limit().unwrap_or(u64::MAX);
 
@@ -367,15 +367,15 @@ impl FromRecoveredTx<TxEip8141> for TxEnv {
             tx_type: tx.ty(),
             caller: tx.sender,
             gas_limit,
-            gas_price: tx.max_fee_per_gas.saturating_to(),
+            gas_price: tx.fees.max_fee_per_gas.saturating_to(),
             kind: TxKind::Call(tx.sender),
             value: U256::ZERO,
             data: Bytes::new(),
             nonce: tx.nonce,
             chain_id: Some(tx.chain_id),
-            gas_priority_fee: Some(tx.max_priority_fee_per_gas),
+            gas_priority_fee: Some(tx.fees.max_priority_fee_per_gas.saturating_to()),
             blob_hashes: tx.blob_versioned_hashes.clone(),
-            max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
+            max_fee_per_blob_gas: tx.fees.max_fee_per_blob_gas.saturating_to(),
             frame_transaction: Some(frame_transaction),
             ..Default::default()
         }
@@ -558,7 +558,9 @@ impl<Eip4844: AsRef<TxEip4844>> FromRecoveredTx<EthereumTxEnvelope<Eip4844>> for
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip8141::{Frame, FrameLimits, FrameMode, FrameSignature, SignatureScheme};
+    use alloy_eips::eip8141::{
+        Frame, FrameLimits, FrameMode, FrameSignature, SignatureScheme, TransactionFees,
+    };
     use alloy_primitives::{address, b256, Sealable, U256};
 
     struct MyTxEnv;
@@ -619,9 +621,11 @@ mod tests {
                 scheme: SignatureScheme::Arbitrary,
                 ..Default::default()
             }],
-            max_priority_fee_per_gas: 2,
-            max_fee_per_gas: 10,
-            max_fee_per_blob_gas: 4,
+            fees: TransactionFees {
+                max_priority_fee_per_gas: U256::from(2),
+                max_fee_per_gas: U256::from(10),
+                max_fee_per_blob_gas: U256::from(4),
+            },
             blob_versioned_hashes: vec![blob_hash],
         };
         let signature_hash = tx.signature_hash();
@@ -635,13 +639,13 @@ mod tests {
         assert_eq!(env.kind, TxKind::Call(sender));
         assert_eq!(env.nonce, tx.nonce);
         assert_eq!(env.chain_id, Some(tx.chain_id));
-        assert_eq!(env.gas_price, tx.max_fee_per_gas.saturating_to());
-        assert_eq!(env.gas_priority_fee, Some(tx.max_priority_fee_per_gas));
+        assert_eq!(env.gas_price, tx.fees.max_fee_per_gas.saturating_to());
+        assert_eq!(env.gas_priority_fee, Some(tx.fees.max_priority_fee_per_gas.saturating_to()));
         assert_eq!(env.blob_hashes, tx.blob_versioned_hashes);
-        assert_eq!(env.max_fee_per_blob_gas, tx.max_fee_per_blob_gas);
+        assert_eq!(env.max_fee_per_blob_gas, tx.fees.max_fee_per_blob_gas.saturating_to());
         assert_eq!(env.gas_limit, frame_transaction.gas_limit().unwrap());
         assert_eq!(frame_transaction.signature_hash, signature_hash);
-        assert_eq!(frame_transaction.max_fee_per_gas, tx.max_fee_per_gas);
+        assert_eq!(frame_transaction.max_fee_per_gas, tx.fees.max_fee_per_gas);
         assert_eq!(frame_transaction.frames, tx.frames);
         assert_eq!(frame_transaction.signatures, tx.signatures);
     }
