@@ -60,11 +60,9 @@ fn build_alloy_receipt<Halt>(
         let ExecutionResult::FrameTransaction { payer, frame_receipts, .. } = result else {
             panic!("EIP-8141 execution must return a frame transaction result")
         };
-        return ReceiptEnvelope::Eip8141(FrameReceiptPayload {
-            cumulative_gas_used,
-            payer,
-            frame_receipts,
-        });
+        return ReceiptEnvelope::Eip8141(
+            FrameReceiptPayload { cumulative_gas_used, payer, frame_receipts }.into(),
+        );
     }
 
     assert!(
