@@ -285,7 +285,7 @@ where
         let EthTxResult { result: ResultAndState { result, state }, blob_gas_used, tx_type } =
             output;
 
-        let tx_gas_used = result.gas().tx_gas_used();
+        let tx_gas_used = result.tx_gas_used();
         let regular_gas_used = result.gas().block_regular_gas_used();
         let state_gas_used = result.gas().block_state_gas_used();
 

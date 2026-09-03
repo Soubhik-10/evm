@@ -69,6 +69,7 @@ impl<Spec, Block: BlockEnvironment> TryIntoTxEnv<TxEnv, Spec, Block> for Transac
             signatures,
             transaction_type: _,
             sidecar: _,
+            ..
         } = self;
 
         let requested_max_fee_per_gas = max_fee_per_gas;
