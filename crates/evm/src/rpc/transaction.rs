@@ -37,6 +37,10 @@ pub enum EthTxEnvError {
     /// Both data and input fields are set and not equal.
     #[error(transparent)]
     Input(#[from] TransactionInputError),
+    /// An EIP-8141 request included fields which are not part of the frame
+    /// transaction envelope and therefore cannot be silently normalized away.
+    #[error("EIP-8141 transaction request contains non-canonical outer fields")]
+    Eip8141InvalidOuterFields,
 }
 
 impl<Spec, Block: BlockEnvironment> TryIntoTxEnv<TxEnv, Spec, Block> for TransactionRequest {
@@ -71,6 +75,20 @@ impl<Spec, Block: BlockEnvironment> TryIntoTxEnv<TxEnv, Spec, Block> for Transac
             sidecar: _,
             ..
         } = self;
+
+        let input = input.try_into_unique_input().map_err(EthTxEnvError::from)?.unwrap_or_default();
+
+        if tx_type == TxType::Eip8141 as u8
+            && (to.is_some()
+                || gas_price.is_some()
+                || gas.is_some()
+                || value.is_some_and(|value| !value.is_zero())
+                || !input.is_empty()
+                || access_list.is_some()
+                || authorization_list.is_some())
+        {
+            return Err(EthTxEnvError::Eip8141InvalidOuterFields);
+        }
 
         let requested_max_fee_per_gas = max_fee_per_gas;
         let requested_max_priority_fee_per_gas = max_priority_fee_per_gas;
@@ -132,7 +150,7 @@ impl<Spec, Block: BlockEnvironment> TryIntoTxEnv<TxEnv, Spec, Block> for Transac
             gas_priority_fee: max_priority_fee_per_gas.map(|v| v.saturating_to()),
             kind: to.unwrap_or(TxKind::Create),
             value: value.unwrap_or_default(),
-            data: input.try_into_unique_input().map_err(EthTxEnvError::from)?.unwrap_or_default(),
+            data: input,
             chain_id: Some(chain_id),
             access_list: access_list.unwrap_or_default(),
             // EIP-4844 fields
@@ -150,5 +168,26 @@ impl<Spec, Block: BlockEnvironment> TryIntoTxEnv<TxEnv, Spec, Block> for Transac
         };
 
         Ok(env)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, TxKind};
+
+    #[test]
+    fn frame_request_rejects_outer_transaction_fields() {
+        let request = TransactionRequest {
+            to: Some(TxKind::Call(Address::ZERO)),
+            frames: Some(Vec::new()),
+            ..Default::default()
+        };
+        let evm_env: EvmEnv = EvmEnv::default();
+
+        assert!(matches!(
+            request.try_into_tx_env(&evm_env),
+            Err(EthTxEnvError::Eip8141InvalidOuterFields)
+        ));
     }
 }

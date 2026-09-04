@@ -89,7 +89,7 @@ fn build_alloy_receipt<Halt>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip8141::{FrameReceipt, FrameStatus};
+    use alloy_eips::eip8141::{FrameGasUsed, FrameReceipt, FrameStatus};
     use alloy_primitives::{address, Log};
     use revm::context::result::{HaltReason, ResultGas};
 
@@ -98,7 +98,7 @@ mod tests {
         let payer = address!("0000000000000000000000000000000000000001");
         let frame_receipts = vec![FrameReceipt {
             status: FrameStatus::Success,
-            gas_used: 42,
+            gas_used: FrameGasUsed { execution: 42, state: 0 },
             logs: vec![Log::default()],
         }];
         let result = ExecutionResult::<HaltReason>::FrameTransaction {
