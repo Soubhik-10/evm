@@ -325,7 +325,7 @@ where
         &mut self,
         tx: impl ExecutableTx<Self>,
     ) -> Result<Self::Result, BlockExecutionError> {
-        let (tx_env, tx) = tx.into_parts();
+        let (tx_env, tx) = tx.into_parts_with_gas_params(&self.evm.cfg_env().gas_params);
 
         // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
         // must be no greater than the block's gasLimit.
@@ -348,7 +348,7 @@ where
 
         if max_tx_gas_usage > block_available_gas {
             return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                transaction_gas_limit: tx.tx().gas_limit(),
+                transaction_gas_limit: tx_env.gas_limit(),
                 block_available_gas,
             }
             .into());
@@ -360,7 +360,7 @@ where
             let state_gas_available = self.evm.block().gas_limit() - self.block_state_gas_used;
             if state_gas_reservation > state_gas_available {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: tx.tx().gas_limit(),
+                    transaction_gas_limit: tx_env.gas_limit(),
                     block_available_gas: state_gas_available,
                 }
                 .into());
@@ -380,7 +380,10 @@ where
         })
     }
 
-    fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
+    fn commit_transaction(
+        &mut self,
+        output: Self::Result,
+    ) -> Result<GasOutput, BlockExecutionError> {
         let EthTxResult { result: ResultAndState { result, state }, blob_gas_used, tx_type } =
             output;
 
@@ -388,10 +391,20 @@ where
         let regular_gas_used = result.gas().block_regular_gas_used();
         let state_gas_used = result.gas().block_state_gas_used();
 
-        // append used gas used
+        let cumulative_gas_used = self.cumulative_tx_gas_used + tx_gas_used;
+
+        // Build the receipt before mutating counters or committing state.
+        let receipt = self.receipt_builder.build_receipt(ReceiptBuilderCtx {
+            tx_type,
+            evm: &self.evm,
+            result,
+            state: &state,
+            cumulative_gas_used,
+        })?;
+
         self.block_regular_gas_used += regular_gas_used;
         self.block_state_gas_used += state_gas_used;
-        self.cumulative_tx_gas_used += tx_gas_used;
+        self.cumulative_tx_gas_used = cumulative_gas_used;
 
         // only determine cancun fields when active
         if self.spec.is_cancun_active_at_timestamp(self.evm.block().timestamp().saturating_to()) {
@@ -399,18 +412,12 @@ where
         }
 
         // Push transaction changeset and calculate header bloom filter for receipt.
-        self.receipts.push(self.receipt_builder.build_receipt(ReceiptBuilderCtx {
-            tx_type,
-            evm: &self.evm,
-            result,
-            state: &state,
-            cumulative_gas_used: self.cumulative_tx_gas_used,
-        }));
+        self.receipts.push(receipt);
 
         // Commit the state changes.
         self.evm.db_mut().commit(state);
 
-        GasOutput::with_state_gas(tx_gas_used, state_gas_used)
+        Ok(GasOutput::with_state_gas(tx_gas_used, state_gas_used))
     }
 
     fn finish(

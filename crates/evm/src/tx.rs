@@ -17,7 +17,8 @@ use alloy_eips::{
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use revm::{
     context::TxEnv,
-    context_interface::{either::Either, transaction::FrameTransaction},
+    context_interface::{cfg::GasParams, either::Either, transaction::FrameTransaction},
+    primitives::hardfork::SpecId,
 };
 
 /// Trait marking types that can be converted into a transaction environment.
@@ -44,6 +45,14 @@ use revm::{
 pub trait IntoTxEnv<TxEnv> {
     /// Converts `self` into [`TxEnv`].
     fn into_tx_env(self) -> TxEnv;
+
+    /// Converts using the active gas schedule. Explicit transaction environments are unchanged.
+    fn into_tx_env_with_gas_params(self, _gas_params: &GasParams) -> TxEnv
+    where
+        Self: Sized,
+    {
+        self.into_tx_env()
+    }
 }
 
 impl IntoTxEnv<Self> for TxEnv {
@@ -58,6 +67,11 @@ impl IntoTxEnv<Self> for TxEnv {
 pub trait ToTxEnv<TxEnv> {
     /// Builds a [`TxEnv`] from `self`.
     fn to_tx_env(&self) -> TxEnv;
+
+    /// Builds a transaction environment using the active gas schedule.
+    fn to_tx_env_with_gas_params(&self, _gas_params: &GasParams) -> TxEnv {
+        self.to_tx_env()
+    }
 }
 
 impl<T, TxEnv> IntoTxEnv<TxEnv> for T
@@ -67,6 +81,10 @@ where
     fn into_tx_env(self) -> TxEnv {
         self.to_tx_env()
     }
+
+    fn into_tx_env_with_gas_params(self, gas_params: &GasParams) -> TxEnv {
+        self.to_tx_env_with_gas_params(gas_params)
+    }
 }
 
 impl<L, R, TxEnv> ToTxEnv<TxEnv> for Either<L, R>
@@ -74,6 +92,13 @@ where
     L: ToTxEnv<TxEnv>,
     R: ToTxEnv<TxEnv>,
 {
+    fn to_tx_env_with_gas_params(&self, gas_params: &GasParams) -> TxEnv {
+        match self {
+            Self::Left(l) => l.to_tx_env_with_gas_params(gas_params),
+            Self::Right(r) => r.to_tx_env_with_gas_params(gas_params),
+        }
+    }
+
     fn to_tx_env(&self) -> TxEnv {
         match self {
             Self::Left(l) => l.to_tx_env(),
@@ -110,18 +135,34 @@ where
 pub trait FromRecoveredTx<Tx> {
     /// Builds a [`TxEnv`] from a transaction and a sender address.
     fn from_recovered_tx(tx: &Tx, sender: Address) -> Self;
+
+    /// Builds an environment using the active gas schedule.
+    fn from_recovered_tx_with_gas_params(tx: &Tx, sender: Address, _gas_params: &GasParams) -> Self
+    where
+        Self: Sized,
+    {
+        Self::from_recovered_tx(tx, sender)
+    }
 }
 
 impl<TxEnv, T> FromRecoveredTx<&T> for TxEnv
 where
     TxEnv: FromRecoveredTx<T>,
 {
+    fn from_recovered_tx_with_gas_params(tx: &&T, sender: Address, gas_params: &GasParams) -> Self {
+        Self::from_recovered_tx_with_gas_params(*tx, sender, gas_params)
+    }
+
     fn from_recovered_tx(tx: &&T, sender: Address) -> Self {
         TxEnv::from_recovered_tx(tx, sender)
     }
 }
 
 impl<T, TxEnv: FromRecoveredTx<T>> ToTxEnv<TxEnv> for Recovered<T> {
+    fn to_tx_env_with_gas_params(&self, gas_params: &GasParams) -> TxEnv {
+        TxEnv::from_recovered_tx_with_gas_params(self.inner(), self.signer(), gas_params)
+    }
+
     fn to_tx_env(&self) -> TxEnv {
         TxEnv::from_recovered_tx(self.inner(), self.signer())
     }
@@ -352,39 +393,63 @@ impl FromTxWithEncoded<TxEip7702> for TxEnv {
 }
 
 impl FromRecoveredTx<TxEip8141> for TxEnv {
-    fn from_recovered_tx(tx: &TxEip8141, _sender: Address) -> Self {
-        // EIP-8141 has no outer ECDSA signature. Its consensus sender is an explicit field, so the
-        // synthetic signer carried by `Recovered` must not be allowed to override it.
-        let frame_transaction = FrameTransaction {
-            frames: tx.frames.clone(),
-            signatures: tx.signatures.clone(),
-            signature_hash: tx.signature_hash(),
-            max_priority_fee_per_gas: tx.fees.max_priority_fee_per_gas,
-            max_fee_per_gas: tx.fees.max_fee_per_gas,
-            max_fee_per_blob_gas: tx.fees.max_fee_per_blob_gas,
-        };
-        let gas_limit = frame_transaction.gas_limit(tx.sender).unwrap_or(u64::MAX);
+    fn from_recovered_tx(tx: &TxEip8141, sender: Address) -> Self {
+        Self::from_recovered_tx_with_gas_params(tx, sender, &GasParams::new_spec(SpecId::AMSTERDAM))
+    }
 
-        Self {
-            tx_type: tx.ty(),
-            caller: tx.sender,
-            gas_limit,
-            gas_price: tx.fees.max_fee_per_gas.saturating_to(),
-            kind: TxKind::Call(tx.sender),
-            value: U256::ZERO,
-            data: Bytes::new(),
-            nonce: tx.nonce,
-            chain_id: Some(tx.chain_id),
-            gas_priority_fee: Some(tx.fees.max_priority_fee_per_gas.saturating_to()),
-            blob_hashes: tx.blob_versioned_hashes.clone(),
-            max_fee_per_blob_gas: tx.fees.max_fee_per_blob_gas.saturating_to(),
-            frame_transaction: Some(Box::new(frame_transaction)),
-            ..Default::default()
-        }
+    fn from_recovered_tx_with_gas_params(
+        tx: &TxEip8141,
+        _sender: Address,
+        gas_params: &GasParams,
+    ) -> Self {
+        tx_env_from_eip8141(tx.clone(), gas_params)
+    }
+}
+
+/// Consumes a frame transaction without cloning its vectors, using the active gas schedule.
+pub fn tx_env_from_eip8141(tx: TxEip8141, gas_params: &GasParams) -> TxEnv {
+    let signature_hash = tx.signature_hash();
+    // EIP-8141 has no outer ECDSA signature. Its consensus sender is an explicit field, so the
+    // synthetic signer carried by `Recovered` must not be allowed to override it.
+    let frame_transaction = FrameTransaction {
+        frames: tx.frames,
+        signatures: tx.signatures,
+        signature_hash,
+        max_priority_fee_per_gas: tx.fees.max_priority_fee_per_gas,
+        max_fee_per_gas: tx.fees.max_fee_per_gas,
+        max_fee_per_blob_gas: tx.fees.max_fee_per_blob_gas,
+    };
+    let gas_limit =
+        frame_transaction.gas_limit_with_params(tx.sender, gas_params).unwrap_or(u64::MAX);
+
+    TxEnv {
+        tx_type: TxEip8141::tx_type(),
+        caller: tx.sender,
+        gas_limit,
+        gas_price: tx.fees.max_fee_per_gas.saturating_to(),
+        kind: TxKind::Call(tx.sender),
+        value: U256::ZERO,
+        data: Bytes::new(),
+        nonce: tx.nonce,
+        chain_id: Some(tx.chain_id),
+        gas_priority_fee: Some(tx.fees.max_priority_fee_per_gas.saturating_to()),
+        blob_hashes: tx.blob_versioned_hashes,
+        max_fee_per_blob_gas: tx.fees.max_fee_per_blob_gas.saturating_to(),
+        frame_transaction: Some(Box::new(frame_transaction)),
+        ..Default::default()
     }
 }
 
 impl FromTxWithEncoded<TxEip8141> for TxEnv {
+    fn from_encoded_tx_with_gas_params(
+        tx: &TxEip8141,
+        sender: Address,
+        _encoded: Bytes,
+        gas_params: &GasParams,
+    ) -> Self {
+        Self::from_recovered_tx_with_gas_params(tx, sender, gas_params)
+    }
+
     fn from_encoded_tx(tx: &TxEip8141, sender: Address, _encoded: Bytes) -> Self {
         Self::from_recovered_tx(tx, sender)
     }
@@ -505,18 +570,50 @@ impl<Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for Arc<T> {
 pub trait FromTxWithEncoded<Tx> {
     /// Builds a [`TxEnv`] from a transaction, its sender, and encoded transaction bytes.
     fn from_encoded_tx(tx: &Tx, sender: Address, encoded: Bytes) -> Self;
+
+    /// Builds an encoded transaction's environment using the active gas schedule.
+    fn from_encoded_tx_with_gas_params(
+        tx: &Tx,
+        sender: Address,
+        encoded: Bytes,
+        _gas_params: &GasParams,
+    ) -> Self
+    where
+        Self: Sized,
+    {
+        Self::from_encoded_tx(tx, sender, encoded)
+    }
 }
 
 impl<TxEnv, T> FromTxWithEncoded<&T> for TxEnv
 where
     TxEnv: FromTxWithEncoded<T>,
 {
+    fn from_encoded_tx_with_gas_params(
+        tx: &&T,
+        sender: Address,
+        encoded: Bytes,
+        gas_params: &GasParams,
+    ) -> Self {
+        Self::from_encoded_tx_with_gas_params(*tx, sender, encoded, gas_params)
+    }
+
     fn from_encoded_tx(tx: &&T, sender: Address, encoded: Bytes) -> Self {
         TxEnv::from_encoded_tx(tx, sender, encoded)
     }
 }
 
 impl<T, TxEnv: FromTxWithEncoded<T>> ToTxEnv<TxEnv> for WithEncoded<Recovered<T>> {
+    fn to_tx_env_with_gas_params(&self, gas_params: &GasParams) -> TxEnv {
+        let recovered = &self.1;
+        TxEnv::from_encoded_tx_with_gas_params(
+            recovered.inner(),
+            recovered.signer(),
+            self.encoded_bytes().clone(),
+            gas_params,
+        )
+    }
+
     fn to_tx_env(&self) -> TxEnv {
         let recovered = &self.1;
         TxEnv::from_encoded_tx(recovered.inner(), recovered.signer(), self.encoded_bytes().clone())
@@ -524,12 +621,33 @@ impl<T, TxEnv: FromTxWithEncoded<T>> ToTxEnv<TxEnv> for WithEncoded<Recovered<T>
 }
 
 impl<T, TxEnv: FromTxWithEncoded<T>> ToTxEnv<TxEnv> for WithEncoded<&Recovered<T>> {
+    fn to_tx_env_with_gas_params(&self, gas_params: &GasParams) -> TxEnv {
+        TxEnv::from_encoded_tx_with_gas_params(
+            self.value(),
+            *self.value().signer(),
+            self.encoded_bytes().clone(),
+            gas_params,
+        )
+    }
+
     fn to_tx_env(&self) -> TxEnv {
         TxEnv::from_encoded_tx(self.value(), *self.value().signer(), self.encoded_bytes().clone())
     }
 }
 
 impl<Eip4844: AsRef<TxEip4844>> FromTxWithEncoded<EthereumTxEnvelope<Eip4844>> for TxEnv {
+    fn from_encoded_tx_with_gas_params(
+        tx: &EthereumTxEnvelope<Eip4844>,
+        caller: Address,
+        encoded: Bytes,
+        gas_params: &GasParams,
+    ) -> Self {
+        if let EthereumTxEnvelope::Eip8141(tx) = tx {
+            return Self::from_encoded_tx_with_gas_params(tx.inner(), caller, encoded, gas_params);
+        }
+        Self::from_encoded_tx(tx, caller, encoded)
+    }
+
     fn from_encoded_tx(tx: &EthereumTxEnvelope<Eip4844>, caller: Address, encoded: Bytes) -> Self {
         match tx {
             EthereumTxEnvelope::Legacy(tx) => Self::from_encoded_tx(tx.tx(), caller, encoded),
@@ -545,6 +663,17 @@ impl<Eip4844: AsRef<TxEip4844>> FromTxWithEncoded<EthereumTxEnvelope<Eip4844>> f
 }
 
 impl<Eip4844: AsRef<TxEip4844>> FromRecoveredTx<EthereumTxEnvelope<Eip4844>> for TxEnv {
+    fn from_recovered_tx_with_gas_params(
+        tx: &EthereumTxEnvelope<Eip4844>,
+        sender: Address,
+        gas_params: &GasParams,
+    ) -> Self {
+        if let EthereumTxEnvelope::Eip8141(tx) = tx {
+            return Self::from_recovered_tx_with_gas_params(tx.inner(), sender, gas_params);
+        }
+        Self::from_recovered_tx(tx, sender)
+    }
+
     fn from_recovered_tx(tx: &EthereumTxEnvelope<Eip4844>, sender: Address) -> Self {
         match tx {
             EthereumTxEnvelope::Legacy(tx) => Self::from_recovered_tx(tx.tx(), sender),

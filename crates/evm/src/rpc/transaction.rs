@@ -1,7 +1,7 @@
 use crate::{
     env::BlockEnvironment,
     rpc::{CallFees, CallFeesError},
-    EvmEnv, FromRecoveredTx,
+    tx_env_from_eip8141, EvmEnv,
 };
 use alloy_consensus::{TxEip8141, TxType};
 use alloy_eips::eip8141::TransactionFees;
@@ -158,7 +158,7 @@ impl<Spec, Block: BlockEnvironment> TryIntoTxEnv<TxEnv, Spec, Block> for Transac
                 },
                 blob_versioned_hashes: blob_versioned_hashes.unwrap_or_default(),
             };
-            return Ok(TxEnv::from_recovered_tx(&tx, caller));
+            return Ok(tx_env_from_eip8141(tx, &evm_env.cfg_env().gas_params));
         }
 
         let env = TxEnv {

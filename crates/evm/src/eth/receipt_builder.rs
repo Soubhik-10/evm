@@ -1,7 +1,10 @@
 //! Abstraction over receipt building logic to allow plugging different primitive types into
 //! [`super::EthBlockExecutor`].
 
-use crate::Evm;
+use crate::{
+    block::{BlockExecutionError, InternalBlockExecutionError},
+    Evm,
+};
 use alloy_consensus::{Eip658Value, ReceiptEnvelope, TransactionEnvelope, TxEnvelope, TxType};
 use alloy_eips::eip8141::FrameReceiptPayload;
 use revm::{context::result::ExecutionResult, state::EvmState};
@@ -31,10 +34,12 @@ pub trait ReceiptBuilder {
     type Receipt;
 
     /// Builds a receipt given a transaction and the result of the execution.
+    ///
+    /// Returns an error when the execution result cannot be represented by the receipt type.
     fn build_receipt<E: Evm>(
         &self,
         ctx: ReceiptBuilderCtx<'_, <Self::Transaction as TransactionEnvelope>::TxType, E>,
-    ) -> Self::Receipt;
+    ) -> Result<Self::Receipt, BlockExecutionError>;
 }
 
 /// Receipt builder operating on Alloy types.
@@ -46,7 +51,10 @@ impl ReceiptBuilder for AlloyReceiptBuilder {
     type Transaction = TxEnvelope;
     type Receipt = ReceiptEnvelope;
 
-    fn build_receipt<E: Evm>(&self, ctx: ReceiptBuilderCtx<'_, TxType, E>) -> Self::Receipt {
+    fn build_receipt<E: Evm>(
+        &self,
+        ctx: ReceiptBuilderCtx<'_, TxType, E>,
+    ) -> Result<Self::Receipt, BlockExecutionError> {
         build_alloy_receipt(ctx.tx_type, ctx.result, ctx.cumulative_gas_used)
     }
 }
@@ -55,20 +63,21 @@ fn build_alloy_receipt<Halt>(
     tx_type: TxType,
     result: ExecutionResult<Halt>,
     cumulative_gas_used: u64,
-) -> ReceiptEnvelope {
-    if tx_type == TxType::Eip8141 {
-        let ExecutionResult::FrameTransaction { payer, frame_receipts, .. } = result else {
-            panic!("EIP-8141 execution must return a frame transaction result")
-        };
-        return ReceiptEnvelope::Eip8141(
+) -> Result<ReceiptEnvelope, BlockExecutionError> {
+    let frame_result = matches!(result, ExecutionResult::FrameTransaction { .. });
+    if (tx_type == TxType::Eip8141) != frame_result {
+        return Err(InternalBlockExecutionError::ReceiptTypeMismatch {
+            transaction_type: tx_type as u8,
+            frame_result,
+        }
+        .into());
+    }
+    if let ExecutionResult::FrameTransaction { payer, frame_receipts, .. } = result {
+        return Ok(ReceiptEnvelope::Eip8141(
             FrameReceiptPayload { cumulative_gas_used, payer, frame_receipts }.into(),
-        );
+        ));
     }
 
-    assert!(
-        !matches!(result, ExecutionResult::FrameTransaction { .. }),
-        "frame transaction result requires an EIP-8141 receipt"
-    );
     let receipt = alloy_consensus::Receipt {
         status: Eip658Value::Eip658(result.is_success()),
         cumulative_gas_used,
@@ -76,14 +85,13 @@ fn build_alloy_receipt<Halt>(
     }
     .with_bloom();
 
-    match tx_type {
-        TxType::Legacy => ReceiptEnvelope::Legacy(receipt),
-        TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt),
-        TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt),
-        TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt),
-        TxType::Eip7702 => ReceiptEnvelope::Eip7702(receipt),
-        TxType::Eip8141 => unreachable!("handled above"),
-    }
+    ReceiptEnvelope::from_typed(tx_type, receipt).map_err(|_| {
+        InternalBlockExecutionError::ReceiptTypeMismatch {
+            transaction_type: tx_type as u8,
+            frame_result,
+        }
+        .into()
+    })
 }
 
 #[cfg(test)]
@@ -109,7 +117,7 @@ mod tests {
             frame_receipts: frame_receipts.clone(),
         };
 
-        let receipt = build_alloy_receipt(TxType::Eip8141, result, 100);
+        let receipt = build_alloy_receipt(TxType::Eip8141, result, 100).unwrap();
         let payload = receipt.as_eip8141().expect("frame receipt");
         assert_eq!(payload.cumulative_gas_used, 100);
         assert_eq!(payload.payer, payer);
