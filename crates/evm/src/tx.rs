@@ -4,7 +4,7 @@
 //! into a unified transaction environment ([`TxEnv`]) that the EVM can execute. The main purpose
 //! of these traits is to enable flexible transaction input while maintaining type safety.
 
-use alloc::sync::Arc;
+use alloc::{boxed::Box, sync::Arc};
 use alloy_consensus::{
     crypto::secp256k1, transaction::Recovered, EthereumTxEnvelope, Signed, TxEip1559, TxEip2930,
     TxEip4844, TxEip4844Variant, TxEip7702, TxEip8141, TxLegacy,
@@ -378,7 +378,7 @@ impl FromRecoveredTx<TxEip8141> for TxEnv {
             gas_priority_fee: Some(tx.fees.max_priority_fee_per_gas.saturating_to()),
             blob_hashes: tx.blob_versioned_hashes.clone(),
             max_fee_per_blob_gas: tx.fees.max_fee_per_blob_gas.saturating_to(),
-            frame_transaction: Some(frame_transaction),
+            frame_transaction: Some(Box::new(frame_transaction)),
             ..Default::default()
         }
     }
@@ -614,7 +614,7 @@ mod tests {
             nonce: 7,
             sender,
             frames: vec![Frame {
-                mode: FrameMode::Default,
+                mode: FrameMode::Sender,
                 limits: FrameLimits { execution: 100, state: 0 },
                 value: U256::from(3),
                 ..Default::default()

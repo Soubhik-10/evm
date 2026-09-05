@@ -63,7 +63,7 @@ serde_json = "1"
 test-case = "3"
 
 [patch.crates-io]
-revm = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-frame-transactions" }
+revm = { git = "https://github.com/Soubhik-10/revm", rev = "48f2d827a61d34becfd20e384160c5d2e7fb4998" }
 
 alloy-consensus = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/eip8141-transaction" }
 alloy-eips = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/eip8141-transaction" }
