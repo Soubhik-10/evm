@@ -14,7 +14,7 @@ use crate::{
         BlockExecutor, BlockExecutorFactory, BlockValidationError, ExecutableTx, GasOutput,
         StateDB, SystemCaller, TxResult,
     },
-    Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded, RecoveredTx,
+    Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded, RecoveredTx, TransactionTr,
 };
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::{Header, Transaction, TransactionEnvelope, TxReceipt};
@@ -99,6 +99,139 @@ pub struct EthTxResult<H, T> {
     pub tx_type: T,
 }
 
+/// Returns the execution and state gas reservations used for block admission.
+///
+/// Frame transactions reserve each gas dimension independently. Their execution reservation is
+/// the larger of the intrinsic execution cost plus the frame execution grants and the calldata
+/// floor; their state reservation is the sum of the frame state-gas limits. Standard transactions
+/// retain the legacy single-limit behavior.
+#[inline]
+pub fn transaction_gas_reservation<T: TransactionTr>(tx: &T, tx_gas_limit_cap: u64) -> (u64, u64) {
+    let gas_limit = tx.gas_limit();
+    let Some(frame_tx) = tx.frame_transaction() else {
+        return (min(gas_limit, tx_gas_limit_cap), gas_limit);
+    };
+
+    // The canonical EIP-8141 gas limit is `execution_reservation + state_reservation`.
+    // It was already calculated while constructing the transaction environment, so only scan the
+    // frame state limits here instead of rescanning all frame and signature calldata.
+    let Some(state_reservation) = frame_tx.total_frame_state_gas_limit() else {
+        return (u64::MAX, u64::MAX);
+    };
+    let execution_reservation = gas_limit.checked_sub(state_reservation).unwrap_or(u64::MAX);
+
+    (execution_reservation, state_reservation)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::transaction_gas_reservation;
+    use alloc::{boxed::Box, vec, vec::Vec};
+    use alloy_eips::eip8141::{Frame, FrameLimits};
+    use alloy_primitives::{Address, Bytes};
+    use revm::context::{transaction::FrameTransaction, TxEnv};
+
+    fn frame_tx_env(frame_transaction: FrameTransaction) -> TxEnv {
+        let caller = Address::ZERO;
+        let gas_limit = frame_transaction.gas_limit(caller).expect("valid frame gas limit");
+
+        TxEnv {
+            caller,
+            gas_limit,
+            frame_transaction: Some(Box::new(frame_transaction)),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn standard_transaction_reservation_is_unchanged() {
+        let tx = TxEnv { gas_limit: 30_000_000, ..Default::default() };
+
+        assert_eq!(transaction_gas_reservation(&tx, 16_777_216), (16_777_216, 30_000_000));
+    }
+
+    #[test]
+    fn frame_transaction_reserves_execution_and_state_independently() {
+        let frame_transaction = FrameTransaction {
+            frames: vec![Frame {
+                limits: FrameLimits { execution: 50_000, state: 7_000 },
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let expected_execution = frame_transaction
+            .intrinsic_gas(Address::ZERO)
+            .expect("valid intrinsic gas")
+            .checked_add(50_000)
+            .expect("valid execution reservation");
+        let tx = frame_tx_env(frame_transaction);
+
+        assert_eq!(tx.gas_limit, expected_execution + 7_000);
+        assert_eq!(transaction_gas_reservation(&tx, u64::MAX), (expected_execution, 7_000));
+    }
+
+    #[test]
+    fn frame_transaction_reservation_handles_calldata_floor() {
+        let frame_transaction = FrameTransaction {
+            frames: vec![Frame {
+                limits: FrameLimits { execution: 0, state: 123 },
+                data: Bytes::from(vec![1; 1_000]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let expected_execution =
+            frame_transaction.calldata_floor_gas(Address::ZERO).expect("valid calldata floor");
+        assert!(
+            expected_execution
+                > frame_transaction.intrinsic_gas(Address::ZERO).expect("valid intrinsic gas")
+        );
+        let tx = frame_tx_env(frame_transaction);
+
+        assert_eq!(tx.gas_limit, expected_execution + 123);
+        assert_eq!(transaction_gas_reservation(&tx, u64::MAX), (expected_execution, 123));
+    }
+
+    #[test]
+    fn inconsistent_frame_gas_limit_saturates_execution_reservation() {
+        let frame_transaction = FrameTransaction {
+            frames: vec![Frame {
+                limits: FrameLimits { execution: 0, state: 2 },
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let tx = TxEnv {
+            gas_limit: 1,
+            frame_transaction: Some(Box::new(frame_transaction)),
+            ..Default::default()
+        };
+
+        assert_eq!(transaction_gas_reservation(&tx, u64::MAX), (u64::MAX, 2));
+    }
+
+    #[test]
+    fn overflowing_frame_state_reservation_saturates_both_dimensions() {
+        let frame_transaction = FrameTransaction {
+            frames: Vec::from([
+                Frame {
+                    limits: FrameLimits { execution: 0, state: u64::MAX },
+                    ..Default::default()
+                },
+                Frame { limits: FrameLimits { execution: 0, state: 1 }, ..Default::default() },
+            ]),
+            ..Default::default()
+        };
+        let tx = TxEnv {
+            gas_limit: u64::MAX,
+            frame_transaction: Some(Box::new(frame_transaction)),
+            ..Default::default()
+        };
+
+        assert_eq!(transaction_gas_reservation(&tx, u64::MAX), (u64::MAX, u64::MAX));
+    }
+}
+
 impl<H, T> TxResult for EthTxResult<H, T>
 where
     H: Send + 'static,
@@ -170,6 +303,7 @@ where
         Spec: Into<SpecId> + Clone,
         Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
     >,
+    E::Tx: TransactionTr,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt<Log = Log>>,
     <R::Transaction as TransactionEnvelope>::TxType: Send + 'static,
@@ -191,7 +325,7 @@ where
         &mut self,
         tx: impl ExecutableTx<Self>,
     ) -> Result<Self::Result, BlockExecutionError> {
-        let (tx_env, tx) = tx.into_parts();
+        let (tx_env, tx) = tx.into_parts_with_gas_params(&self.evm.cfg_env().gas_params);
 
         // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
         // must be no greater than the block's gasLimit.
@@ -209,25 +343,24 @@ where
 
         // Use regular part of transaction gas limit to check if it fits inside available block
         // space.
-        let max_tx_gas_usage = min(tx.tx().gas_limit(), self.evm.cfg_env().tx_gas_limit_cap());
+        let (max_tx_gas_usage, state_gas_reservation) =
+            transaction_gas_reservation(&tx_env, self.evm.cfg_env().tx_gas_limit_cap());
 
         if max_tx_gas_usage > block_available_gas {
             return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                transaction_gas_limit: tx.tx().gas_limit(),
+                transaction_gas_limit: tx_env.gas_limit(),
                 block_available_gas,
             }
             .into());
         }
 
-        // Amsterdam+: the state-gas dimension has its own budget of `block_gas_limit`
-        // (execution-specs `check_block_gas_capacity`). Unlike the execution dimension,
-        // the transaction's full gas limit counts against it — state gas is drawn from
-        // the reservoir above `tx_gas_limit_cap`, so the cap does not bound it.
+        // Amsterdam+: frame transactions use an explicit state-gas reservation, while standard
+        // transactions retain the full transaction gas limit for this dimension.
         if self.evm.cfg_env().enable_amsterdam_eip8037 && !self.skip_state_gas_capacity_check {
             let state_gas_available = self.evm.block().gas_limit() - self.block_state_gas_used;
-            if tx.tx().gas_limit() > state_gas_available {
+            if state_gas_reservation > state_gas_available {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: tx.tx().gas_limit(),
+                    transaction_gas_limit: tx_env.gas_limit(),
                     block_available_gas: state_gas_available,
                 }
                 .into());
@@ -247,18 +380,31 @@ where
         })
     }
 
-    fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
+    fn commit_transaction(
+        &mut self,
+        output: Self::Result,
+    ) -> Result<GasOutput, BlockExecutionError> {
         let EthTxResult { result: ResultAndState { result, state }, blob_gas_used, tx_type } =
             output;
 
-        let tx_gas_used = result.gas().tx_gas_used();
+        let tx_gas_used = result.tx_gas_used();
         let regular_gas_used = result.gas().block_regular_gas_used();
         let state_gas_used = result.gas().block_state_gas_used();
 
-        // append used gas used
+        let cumulative_gas_used = self.cumulative_tx_gas_used + tx_gas_used;
+
+        // Build the receipt before mutating counters or committing state.
+        let receipt = self.receipt_builder.build_receipt(ReceiptBuilderCtx {
+            tx_type,
+            evm: &self.evm,
+            result,
+            state: &state,
+            cumulative_gas_used,
+        })?;
+
         self.block_regular_gas_used += regular_gas_used;
         self.block_state_gas_used += state_gas_used;
-        self.cumulative_tx_gas_used += tx_gas_used;
+        self.cumulative_tx_gas_used = cumulative_gas_used;
 
         // only determine cancun fields when active
         if self.spec.is_cancun_active_at_timestamp(self.evm.block().timestamp().saturating_to()) {
@@ -266,18 +412,12 @@ where
         }
 
         // Push transaction changeset and calculate header bloom filter for receipt.
-        self.receipts.push(self.receipt_builder.build_receipt(ReceiptBuilderCtx {
-            tx_type,
-            evm: &self.evm,
-            result,
-            state: &state,
-            cumulative_gas_used: self.cumulative_tx_gas_used,
-        }));
+        self.receipts.push(receipt);
 
         // Commit the state changes.
         self.evm.db_mut().commit(state);
 
-        GasOutput::with_state_gas(tx_gas_used, state_gas_used)
+        Ok(GasOutput::with_state_gas(tx_gas_used, state_gas_used))
     }
 
     fn finish(
@@ -412,6 +552,7 @@ where
         Spec: Into<SpecId> + Clone,
         Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
     >,
+    EvmF::Tx: TransactionTr,
     <R::Transaction as TransactionEnvelope>::TxType: Send + 'static,
     Self: 'static,
 {

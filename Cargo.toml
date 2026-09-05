@@ -40,16 +40,16 @@ alloy-evm = { version = "0.39.0", path = "crates/evm", default-features = false 
 # alloy
 alloy-eip2124 = { version = "0.2", default-features = false }
 alloy-chains = { version = "0.2.0", default-features = false }
-alloy-eips = { version = "2.0.0", default-features = false }
-alloy-consensus = { version = "2.0.0", default-features = false }
+alloy-eips = { git = "https://github.com/Rimeeeeee/alloy", rev = "c395a28b8f2146245af3805faa05ad00c9d22864", default-features = false }
+alloy-consensus = { git = "https://github.com/Rimeeeeee/alloy", rev = "c395a28b8f2146245af3805faa05ad00c9d22864", default-features = false }
 alloy-primitives = { version = "1.0.0", default-features = false }
 alloy-sol-types = { version = "1.0.0", default-features = false }
-alloy-hardforks = { version = "0.4.7" }
-alloy-rpc-types-eth = { version = "2.0.0", default-features = false }
-alloy-rpc-types-engine = { version = "2.0.0", default-features = false }
+alloy-hardforks = "0.4.8"
+alloy-rpc-types-eth = { git = "https://github.com/Rimeeeeee/alloy", rev = "c395a28b8f2146245af3805faa05ad00c9d22864", default-features = false }
+alloy-rpc-types-engine = { git = "https://github.com/Rimeeeeee/alloy", rev = "c395a28b8f2146245af3805faa05ad00c9d22864", default-features = false }
 
 # revm
-revm = { version = "43.0.0", default-features = false }
+revm = { git = "https://github.com/Soubhik-10/revm", rev = "a72606f056907ae4cea35bb93ae70761f486387e", default-features = false }
 
 # tracing
 tracing = { version = "0.1", default-features = false }

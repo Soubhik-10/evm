@@ -91,7 +91,7 @@ pub trait Evm {
         &mut self,
         tx: impl IntoTxEnv<Self::Tx>,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        self.transact_raw(tx.into_tx_env())
+        self.transact_raw(tx.into_tx_env_with_gas_params(&self.cfg_env().gas_params))
     }
 
     /// Executes a system call.
