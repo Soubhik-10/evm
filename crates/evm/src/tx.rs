@@ -560,6 +560,7 @@ impl<Eip4844: AsRef<TxEip4844>> FromRecoveredTx<EthereumTxEnvelope<Eip4844>> for
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
     use alloy_eips::eip8141::{
         Frame, FrameLimits, FrameMode, FrameSignature, SignatureScheme, TransactionFees,
     };

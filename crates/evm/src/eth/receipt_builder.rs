@@ -89,6 +89,7 @@ fn build_alloy_receipt<Halt>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
     use alloy_eips::eip8141::{FrameGasUsed, FrameReceipt, FrameStatus};
     use alloy_primitives::{address, Log};
     use revm::context::result::{HaltReason, ResultGas};

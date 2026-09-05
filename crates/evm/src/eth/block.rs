@@ -343,13 +343,12 @@ where
 
         // Use regular part of transaction gas limit to check if it fits inside available block
         // space.
-        let tx_gas_limit = tx.tx().gas_limit();
         let (max_tx_gas_usage, state_gas_reservation) =
             transaction_gas_reservation(&tx_env, self.evm.cfg_env().tx_gas_limit_cap());
 
         if max_tx_gas_usage > block_available_gas {
             return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                transaction_gas_limit: tx_gas_limit,
+                transaction_gas_limit: tx.tx().gas_limit(),
                 block_available_gas,
             }
             .into());
@@ -361,7 +360,7 @@ where
             let state_gas_available = self.evm.block().gas_limit() - self.block_state_gas_used;
             if state_gas_reservation > state_gas_available {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: tx_gas_limit,
+                    transaction_gas_limit: tx.tx().gas_limit(),
                     block_available_gas: state_gas_available,
                 }
                 .into());
