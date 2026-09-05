@@ -60,7 +60,9 @@ pub trait TransactionTr: Any {
     fn tx_type(&self) -> u8;
 
     /// Returns the EIP-8141 frame transaction payload, if this is a frame transaction.
-    fn frame_transaction(&self) -> Option<&FrameTransaction>;
+    fn frame_transaction(&self) -> Option<&FrameTransaction> {
+        None
+    }
 
     /// Caller aka Author aka transaction signer.
     ///
