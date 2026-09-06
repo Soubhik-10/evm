@@ -49,7 +49,7 @@ alloy-rpc-types-eth = { git = "https://github.com/Rimeeeeee/alloy", rev = "c395a
 alloy-rpc-types-engine = { git = "https://github.com/Rimeeeeee/alloy", rev = "c395a28b8f2146245af3805faa05ad00c9d22864", default-features = false }
 
 # revm
-revm = { git = "https://github.com/Soubhik-10/revm", rev = "a72606f056907ae4cea35bb93ae70761f486387e", default-features = false }
+revm = { git = "https://github.com/Soubhik-10/revm", rev = "50a0c579fa95d087f75c4a470f9ec07db97c9ae3", default-features = false }
 
 # tracing
 tracing = { version = "0.1", default-features = false }
