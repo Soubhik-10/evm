@@ -18,21 +18,15 @@ use crate::{
 };
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::{Header, Transaction, TransactionEnvelope, TxReceipt};
-use alloy_eips::{
-    eip4895::Withdrawal,
-    eip7685::Requests,
-    eip8141::{EXPIRY_VERIFIER, EXPIRY_VERIFIER_RUNTIME},
-    Encodable2718,
-};
+use alloy_eips::{eip4895::Withdrawal, eip7685::Requests, Encodable2718};
 use alloy_hardforks::EthereumHardfork;
-use alloy_primitives::{keccak256, Bytes, Log, B256};
+use alloy_primitives::{Bytes, Log, B256};
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Cfg},
     database::DatabaseCommitExt,
     primitives::hardfork::SpecId,
-    state::{Account, Bytecode, TransactionId},
-    Database, DatabaseCommit, Inspector,
+    DatabaseCommit, Inspector,
 };
 
 /// Context for Ethereum block execution.
@@ -300,28 +294,6 @@ where
         }
         self.block_state_gas_used
     }
-
-    fn install_expiry_verifier(&mut self) -> Result<(), BlockExecutionError>
-    where
-        Evm: crate::Evm<DB: StateDB>,
-    {
-        let db = self.evm.db_mut();
-        let runtime_hash = keccak256(EXPIRY_VERIFIER_RUNTIME);
-        let current = db.basic(EXPIRY_VERIFIER).map_err(BlockExecutionError::other)?;
-        if current.as_ref().is_some_and(|account| account.code_hash == runtime_hash) {
-            return Ok(());
-        }
-
-        let mut account = current
-            .map(Account::from)
-            .unwrap_or_else(|| Account::new_not_existing(TransactionId::ZERO));
-        account.info.code_hash = runtime_hash;
-        account.info.code =
-            Some(Bytecode::new_legacy(Bytes::copy_from_slice(&EXPIRY_VERIFIER_RUNTIME)));
-        account.mark_touch();
-        db.commit([(EXPIRY_VERIFIER, account)].into_iter().collect());
-        Ok(())
-    }
 }
 
 impl<E, Spec, R> BlockExecutor for EthBlockExecutor<'_, E, Spec, R>
@@ -346,9 +318,7 @@ where
         self.system_caller
             .apply_beacon_root_contract_call(self.ctx.parent_beacon_block_root, &mut self.evm)?;
 
-        if self.spec.is_bogota_active_at_timestamp(self.evm.block().timestamp().saturating_to()) {
-            self.install_expiry_verifier()?;
-        }
+        self.system_caller.apply_eip8141_fork_transition(&mut self.evm)?;
 
         Ok(())
     }
