@@ -10,9 +10,15 @@ use core::{
 };
 use revm::{
     context::{BlockEnv, CfgEnv, DBErrorMarker, Evm as RevmEvm, TxEnv},
-    context_interface::result::{EVMError, HaltReason, ResultAndState},
-    handler::{instructions::EthInstructions, EthFrame, EthPrecompiles, PrecompileProvider},
-    inspector::NoOpInspector,
+    context_interface::{
+        result::{EVMError, HaltReason, ResultAndState},
+        ContextSetters,
+    },
+    handler::{
+        eip8141, instructions::EthInstructions, EthFrame, EthPrecompiles, MainnetHandler,
+        PrecompileProvider,
+    },
+    inspector::{InspectorHandler, NoOpInspector},
     interpreter::{interpreter::EthInterpreter, InterpreterResult},
     precompile::{PrecompileSpecId, Precompiles},
     primitives::hardfork::SpecId,
@@ -228,6 +234,20 @@ where
         } else {
             self.inner.transact(tx)
         }
+    }
+
+    fn validate_frame_transaction(
+        &mut self,
+        tx: Self::Tx,
+        prefix_end: usize,
+    ) -> Option<Result<revm::handler::eip8141::FrameValidationResult, Self::Error>> {
+        self.inner.ctx.set_tx(tx);
+        if self.inspect {
+            return Some(
+                MainnetHandler::default().inspect_validate_prefix(&mut self.inner, prefix_end),
+            );
+        }
+        Some(eip8141::validate_prefix(&mut MainnetHandler::default(), &mut self.inner, prefix_end))
     }
 
     fn transact_system_call(

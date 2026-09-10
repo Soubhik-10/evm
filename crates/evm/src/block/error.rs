@@ -199,6 +199,16 @@ impl BlockExecutionError {
 /// Internal (i.e., not validation or consensus related) `BlockExecutor` Errors
 #[derive(Debug, thiserror::Error)]
 pub enum InternalBlockExecutionError {
+    /// The adapter returned an execution result incompatible with the receipt type.
+    #[error(
+        "transaction type {transaction_type} is incompatible with frame result = {frame_result}"
+    )]
+    ReceiptTypeMismatch {
+        /// The transaction type that determines the receipt encoding.
+        transaction_type: u8,
+        /// Whether execution returned a frame transaction result.
+        frame_result: bool,
+    },
     /// EVM error occurred when executing a transaction. This is different from
     /// [`BlockValidationError::InvalidTx`] because it will only contain EVM errors which are not
     /// transaction validation errors and are assumed to be fatal.

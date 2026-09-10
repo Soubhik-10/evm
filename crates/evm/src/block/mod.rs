@@ -5,7 +5,9 @@ use alloc::vec::Vec;
 use alloy_consensus::transaction::Recovered;
 use alloy_eips::{eip2718::WithEncoded, eip7685::Requests};
 use revm::{
-    context::result::ResultAndState, context_interface::either::Either, inspector::NoOpInspector,
+    context::result::ResultAndState,
+    context_interface::{cfg::GasParams, either::Either},
+    inspector::NoOpInspector,
     Inspector,
 };
 
@@ -75,6 +77,14 @@ pub trait ExecutableTxParts<TxEnv, T> {
     /// Converts the transaction into the executable transaction environment (`TxEnv`) and the
     /// original recovered transaction.
     fn into_parts(self) -> (TxEnv, Self::Recovered);
+
+    /// Converts with the active gas schedule. Prebuilt environments remain unchanged.
+    fn into_parts_with_gas_params(self, _gas_params: &GasParams) -> (TxEnv, Self::Recovered)
+    where
+        Self: Sized,
+    {
+        self.into_parts()
+    }
 }
 
 /// Blanket implementation for references to types implementing both [`ToTxEnv`] and
@@ -93,6 +103,10 @@ where
     fn into_parts(self) -> (TxEnv, &'a S) {
         (self.to_tx_env(), self)
     }
+
+    fn into_parts_with_gas_params(self, gas_params: &GasParams) -> (TxEnv, &'a S) {
+        (self.to_tx_env_with_gas_params(gas_params), self)
+    }
 }
 
 impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for (TxEnv, T) {
@@ -106,6 +120,10 @@ impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for (TxEnv, T) 
 impl<T, TxEnv: FromRecoveredTx<T>> ExecutableTxParts<TxEnv, T> for Recovered<T> {
     type Recovered = Self;
 
+    fn into_parts_with_gas_params(self, gas_params: &GasParams) -> (TxEnv, Self) {
+        (self.to_tx_env_with_gas_params(gas_params), self)
+    }
+
     fn into_parts(self) -> (TxEnv, Self) {
         (self.to_tx_env(), self)
     }
@@ -113,6 +131,10 @@ impl<T, TxEnv: FromRecoveredTx<T>> ExecutableTxParts<TxEnv, T> for Recovered<T> 
 
 impl<T, TxEnv: FromRecoveredTx<T>> ExecutableTxParts<TxEnv, T> for Recovered<&T> {
     type Recovered = Self;
+
+    fn into_parts_with_gas_params(self, gas_params: &GasParams) -> (TxEnv, Self) {
+        (self.to_tx_env_with_gas_params(gas_params), self)
+    }
 
     fn into_parts(self) -> (TxEnv, Self) {
         (self.to_tx_env(), self)
@@ -122,6 +144,10 @@ impl<T, TxEnv: FromRecoveredTx<T>> ExecutableTxParts<TxEnv, T> for Recovered<&T>
 impl<T, TxEnv: FromTxWithEncoded<T>> ExecutableTxParts<TxEnv, T> for WithEncoded<Recovered<T>> {
     type Recovered = Self;
 
+    fn into_parts_with_gas_params(self, gas_params: &GasParams) -> (TxEnv, Self) {
+        (self.to_tx_env_with_gas_params(gas_params), self)
+    }
+
     fn into_parts(self) -> (TxEnv, Self) {
         (self.to_tx_env(), self)
     }
@@ -129,6 +155,10 @@ impl<T, TxEnv: FromTxWithEncoded<T>> ExecutableTxParts<TxEnv, T> for WithEncoded
 
 impl<T, TxEnv: FromTxWithEncoded<T>> ExecutableTxParts<TxEnv, T> for WithEncoded<&Recovered<T>> {
     type Recovered = Self;
+
+    fn into_parts_with_gas_params(self, gas_params: &GasParams) -> (TxEnv, Self) {
+        (self.to_tx_env_with_gas_params(gas_params), self)
+    }
 
     fn into_parts(self) -> (TxEnv, Self) {
         (self.to_tx_env(), self)
@@ -141,6 +171,19 @@ where
     R: ExecutableTxParts<TxEnv, T>,
 {
     type Recovered = Either<L::Recovered, R::Recovered>;
+
+    fn into_parts_with_gas_params(self, gas_params: &GasParams) -> (TxEnv, Self::Recovered) {
+        match self {
+            Self::Left(l) => {
+                let (env, rec) = l.into_parts_with_gas_params(gas_params);
+                (env, Either::Left(rec))
+            }
+            Self::Right(r) => {
+                let (env, rec) = r.into_parts_with_gas_params(gas_params);
+                (env, Either::Right(rec))
+            }
+        }
+    }
 
     fn into_parts(self) -> (TxEnv, Self::Recovered) {
         match self {
@@ -366,7 +409,7 @@ pub trait BlockExecutor {
             return Ok(None);
         }
 
-        let gas_used = self.commit_transaction(output);
+        let gas_used = self.commit_transaction(output)?;
         Ok(Some(gas_used))
     }
 
@@ -398,7 +441,12 @@ pub trait BlockExecutor {
     ///
     /// # Parameters
     /// - `output`: The transaction output containing execution result and state changes
-    fn commit_transaction(&mut self, output: Self::Result) -> GasOutput;
+    ///
+    /// Returns an error if a receipt cannot be built. On failure, no state changes are committed.
+    fn commit_transaction(
+        &mut self,
+        output: Self::Result,
+    ) -> Result<GasOutput, BlockExecutionError>;
 
     /// Applies any necessary changes after executing the block's transactions, completes execution
     /// and returns the underlying EVM along with execution result.
