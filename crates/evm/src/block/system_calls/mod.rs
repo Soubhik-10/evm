@@ -14,6 +14,7 @@ mod eip4788;
 mod eip7002;
 mod eip7251;
 mod eip8141;
+mod eip8272;
 mod eip8282;
 
 pub use eip8282::{
@@ -53,7 +54,7 @@ where
         Ok(())
     }
 
-    /// Applies the EIP-8141 fork-state transition.
+    /// Applies the frame-transaction fork-state transitions.
     ///
     /// Unlike the other operations in this module, this does not execute a system call. The
     /// hardfork installs the verifier runtime directly into state.
@@ -63,6 +64,7 @@ where
     ) -> Result<(), BlockExecutionError> {
         if self.spec.is_bogota_active_at_timestamp(evm.block().timestamp().saturating_to()) {
             eip8141::install_expiry_verifier(evm)?;
+            eip8272::install_recent_root_contract(evm)?;
         }
 
         Ok(())
