@@ -309,6 +309,7 @@ fn receipt_mismatches_return_errors() {
                 payer: SENDER,
                 logs: vec![],
                 frame_receipts: vec![],
+                frame_outputs: vec![],
             }
         };
         let result = AlloyReceiptBuilder::default().build_receipt(ReceiptBuilderCtx {
