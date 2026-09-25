@@ -99,6 +99,12 @@ pub(crate) fn deposit_post_commit<Halt: Debug>(
             }
             .into())
         }
+        ExecutionResult::FrameTransaction { .. } => {
+            Err(BlockValidationError::BuilderDepositRequestsContractCall {
+                message: "system call returned an EIP-8141 frame transaction result".into(),
+            }
+            .into())
+        }
     }
 }
 
@@ -118,6 +124,12 @@ pub(crate) fn exit_post_commit<Halt: Debug>(
         ExecutionResult::Halt { reason, .. } => {
             Err(BlockValidationError::BuilderExitRequestsContractCall {
                 message: format!("execution halted: {reason:?}"),
+            }
+            .into())
+        }
+        ExecutionResult::FrameTransaction { .. } => {
+            Err(BlockValidationError::BuilderExitRequestsContractCall {
+                message: "system call returned an EIP-8141 frame transaction result".into(),
             }
             .into())
         }

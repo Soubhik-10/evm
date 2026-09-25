@@ -51,6 +51,14 @@ where
         either::for_both!(self, evm => evm.transact(tx))
     }
 
+    fn validate_frame_transaction(
+        &mut self,
+        tx: Self::Tx,
+        prefix_end: usize,
+    ) -> Option<Result<revm::handler::eip8141::FrameValidationResult, Self::Error>> {
+        either::for_both!(self, evm => evm.validate_frame_transaction(tx, prefix_end))
+    }
+
     fn transact_system_call(
         &mut self,
         caller: Address,

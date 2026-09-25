@@ -64,5 +64,11 @@ pub(crate) fn post_commit<Halt: Debug>(
             }
             .into())
         }
+        ExecutionResult::FrameTransaction { .. } => {
+            Err(BlockValidationError::WithdrawalRequestsContractCall {
+                message: "system call returned an EIP-8141 frame transaction result".into(),
+            }
+            .into())
+        }
     }
 }

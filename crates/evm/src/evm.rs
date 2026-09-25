@@ -91,7 +91,20 @@ pub trait Evm {
         &mut self,
         tx: impl IntoTxEnv<Self::Tx>,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        self.transact_raw(tx.into_tx_env())
+        self.transact_raw(tx.into_tx_env_with_gas_params(&self.cfg_env().gas_params))
+    }
+
+    /// Validates an EIP-8141 frame transaction for public-pool admission.
+    ///
+    /// Implementations that cannot preserve every configured execution hook
+    /// may return `None`. A successful result has executed and discarded only
+    /// the policy-selected prefix.
+    fn validate_frame_transaction(
+        &mut self,
+        _tx: Self::Tx,
+        _prefix_end: usize,
+    ) -> Option<Result<revm::handler::eip8141::FrameValidationResult, Self::Error>> {
+        None
     }
 
     /// Executes a system call.
