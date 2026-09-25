@@ -21,6 +21,7 @@ pub fn spec_by_timestamp_and_block_number<C>(
 where
     C: EthereumHardforks,
 {
+    // The frames devnet activates the EIP-8141 envelope and EIP-8250 keyed nonce rules together.
     if chain_spec.is_bogota_active_at_timestamp(timestamp) {
         SpecId::BOGOTA
     } else if chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
@@ -156,7 +157,7 @@ mod tests {
 
     #[test_case::test_case(FakeHardfork::osaka(), SpecId::OSAKA; "Osaka")]
     #[test_case::test_case(FakeHardfork::amsterdam(), SpecId::AMSTERDAM; "Amsterdam")]
-    #[test_case::test_case(FakeHardfork::bogota(), SpecId::BOGOTA; "Bogota with EIP-8141")]
+    #[test_case::test_case(FakeHardfork::bogota(), SpecId::BOGOTA; "Bogota with EIP-8141 and EIP-8250")]
     #[test_case::test_case(FakeHardfork::prague(), SpecId::PRAGUE; "Prague")]
     #[test_case::test_case(FakeHardfork::cancun(), SpecId::CANCUN; "Cancun")]
     #[test_case::test_case(FakeHardfork::shanghai(), SpecId::SHANGHAI; "Shanghai")]

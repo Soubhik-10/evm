@@ -3,6 +3,7 @@ use crate::{
     rpc::{CallFees, CallFeesError},
     tx_env_from_eip8141, EvmEnv,
 };
+use alloc::vec;
 use alloy_consensus::{TxEip8141, TxType};
 use alloy_eips::eip8141::TransactionFees;
 use alloy_primitives::{TxKind, U256};
@@ -68,6 +69,8 @@ impl<Spec, Block: BlockEnvironment> TryIntoTxEnv<TxEnv, Spec, Block> for Transac
             value,
             input,
             nonce,
+            nonce_keys,
+            nonce_seq,
             access_list,
             chain_id,
             blob_versioned_hashes,
@@ -146,7 +149,8 @@ impl<Spec, Block: BlockEnvironment> TryIntoTxEnv<TxEnv, Spec, Block> for Transac
         if tx_type == TxType::Eip8141 as u8 {
             let tx = TxEip8141 {
                 chain_id,
-                nonce,
+                nonce_keys: nonce_keys.unwrap_or_else(|| vec![U256::ZERO]),
+                nonce_seq: nonce_seq.unwrap_or(nonce),
                 sender: caller,
                 frames: frames.unwrap_or_default(),
                 signatures: signatures.unwrap_or_default(),
@@ -233,6 +237,23 @@ mod tests {
         assert_eq!(env.tx_type, TxType::Eip8141 as u8);
         assert!(env.blob_hashes.is_empty());
         assert_eq!(env.frame_transaction.as_deref().unwrap().max_fee_per_blob_gas, U256::ZERO);
+    }
+
+    #[test]
+    fn frame_request_preserves_keyed_nonce_fields() {
+        let request = TransactionRequest {
+            nonce_keys: Some(vec![U256::from(4), U256::from(9)]),
+            nonce_seq: Some(7),
+            frames: Some(vec![Frame::default()]),
+            transaction_type: Some(TxType::Eip8141 as u8),
+            ..Default::default()
+        };
+        let evm_env: EvmEnv = EvmEnv::default();
+        let env: TxEnv = request.try_into_tx_env(&evm_env).unwrap();
+        let frame = env.frame_transaction.unwrap();
+        assert_eq!(frame.nonce_keys, vec![U256::from(4), U256::from(9)]);
+        assert_eq!(frame.nonce_seq, 7);
+        assert_eq!(env.nonce, 7);
     }
 
     #[test]

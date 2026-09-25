@@ -63,6 +63,7 @@ where
     ) -> Result<(), BlockExecutionError> {
         if self.spec.is_bogota_active_at_timestamp(evm.block().timestamp().saturating_to()) {
             eip8141::install_expiry_verifier(evm)?;
+            eip8141::install_nonce_manager(evm)?;
         }
 
         Ok(())
