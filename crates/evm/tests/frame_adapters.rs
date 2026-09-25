@@ -262,6 +262,7 @@ fn receipt_mismatches_return_errors() {
                 payer: SENDER,
                 logs: vec![],
                 frame_receipts: vec![],
+                frame_outputs: vec![],
             }
         };
         let result = AlloyReceiptBuilder::default().build_receipt(ReceiptBuilderCtx {
@@ -311,14 +312,21 @@ fn failed_receipt_does_not_commit_state_or_counters() {
 
 #[cfg(feature = "rpc")]
 #[test]
-fn rpc_frame_uses_custom_schedule_and_moves_request_buffers() {
+fn rpc_frame_uses_custom_schedule_and_preserves_request_frames() {
     use alloy_evm::rpc::TryIntoTxEnv;
     let tx = frame_tx();
     let request: alloy_rpc_types_eth::TransactionRequest = tx.into();
-    let frames = request.frames.as_ref().unwrap().as_ptr();
+    let frames: Vec<Frame> = request
+        .frames
+        .as_ref()
+        .unwrap()
+        .iter()
+        .cloned()
+        .map(|frame| frame.try_into().unwrap())
+        .collect();
     let env = request.try_into_tx_env(&custom_env()).unwrap();
     assert_eq!(env.gas_limit, 62_555);
-    assert_eq!(env.frame_transaction.as_ref().unwrap().frames.as_ptr(), frames);
+    assert_eq!(env.frame_transaction.as_ref().unwrap().frames, frames);
     let mut evm = EthEvmFactory::default().create_evm(db(), custom_env());
     assert!(evm.transact(env).is_ok());
 }

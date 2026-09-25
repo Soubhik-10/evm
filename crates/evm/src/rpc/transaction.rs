@@ -41,6 +41,9 @@ pub enum EthTxEnvError {
     /// transaction envelope and therefore cannot be silently normalized away.
     #[error("EIP-8141 transaction request contains non-canonical outer fields")]
     Eip8141InvalidOuterFields,
+    /// A frame request must have both gas limits before execution.
+    #[error("{0}")]
+    Eip8141MissingLimit(&'static str),
 }
 
 impl<Spec, Block: BlockEnvironment> TryIntoTxEnv<TxEnv, Spec, Block> for TransactionRequest {
@@ -148,7 +151,12 @@ impl<Spec, Block: BlockEnvironment> TryIntoTxEnv<TxEnv, Spec, Block> for Transac
                 chain_id,
                 nonce,
                 sender: caller,
-                frames: frames.unwrap_or_default(),
+                frames: frames
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()
+                    .map_err(EthTxEnvError::Eip8141MissingLimit)?,
                 signatures: signatures.unwrap_or_default(),
                 fees: TransactionFees {
                     max_priority_fee_per_gas: requested_max_priority_fee_per_gas
@@ -222,7 +230,7 @@ mod tests {
             max_priority_fee_per_gas: Some(0),
             max_fee_per_blob_gas: Some(0),
             blob_versioned_hashes: Some(Vec::new()),
-            frames: Some(vec![Frame::default()]),
+            frames: Some(vec![Frame::default().into()]),
             signatures: Some(Vec::new()),
             transaction_type: Some(TxType::Eip8141 as u8),
             ..Default::default()
@@ -249,7 +257,7 @@ mod tests {
             max_priority_fee_per_gas: None,
             max_fee_per_blob_gas: Some(0),
             blob_versioned_hashes: Some(Vec::new()),
-            frames: Some(vec![Frame::default()]),
+            frames: Some(vec![Frame::default().into()]),
             signatures: Some(Vec::<FrameSignature>::new()),
             eip8141_fees: Some(fees),
             transaction_type: Some(TxType::Eip8141 as u8),
@@ -267,7 +275,7 @@ mod tests {
     #[test]
     fn frame_request_explicit_fees_override_full_width_fallback() {
         let request = TransactionRequest {
-            frames: Some(vec![Frame::default()]),
+            frames: Some(vec![Frame::default().into()]),
             max_fee_per_gas: Some(20),
             max_priority_fee_per_gas: Some(2),
             max_fee_per_blob_gas: Some(0),
@@ -289,7 +297,7 @@ mod tests {
     #[test]
     fn frame_request_validates_full_width_fees() {
         let request = TransactionRequest {
-            frames: Some(vec![Frame::default()]),
+            frames: Some(vec![Frame::default().into()]),
             eip8141_fees: Some(TransactionFees {
                 max_fee_per_gas: U256::from(u128::MAX) + U256::from(1),
                 max_priority_fee_per_gas: U256::from(u128::MAX) + U256::from(2),
