@@ -115,6 +115,7 @@ mod tests {
             payer,
             logs: frame_receipts[0].logs.clone(),
             frame_receipts: frame_receipts.clone(),
+            frame_outputs: vec![Default::default()],
         };
 
         let receipt = build_alloy_receipt(TxType::Eip8141, result, 100).unwrap();
