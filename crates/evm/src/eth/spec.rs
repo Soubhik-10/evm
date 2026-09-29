@@ -7,11 +7,6 @@ use alloy_primitives::{address, Address};
 /// A configuration object for [`super::EthBlockExecutor`]
 #[auto_impl::auto_impl(&, Arc)]
 pub trait EthExecutorSpec: EthereumHardforks {
-    /// EIP-8250 activation timestamp, absent when disabled.
-    fn eip8250_timestamp(&self) -> Option<u64> {
-        None
-    }
-
     /// Address of deposit contract emitting deposit events.
     ///
     /// Used by [`super::eip6110::parse_deposits_from_receipts`].
