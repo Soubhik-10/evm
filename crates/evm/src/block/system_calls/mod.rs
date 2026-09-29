@@ -14,6 +14,7 @@ mod eip4788;
 mod eip7002;
 mod eip7251;
 mod eip8141;
+mod eip8250;
 mod eip8282;
 
 pub use eip8282::{
@@ -60,10 +61,19 @@ where
     pub fn apply_eip8141_fork_transition(
         &mut self,
         evm: &mut impl Evm<DB: DatabaseCommit>,
-    ) -> Result<(), BlockExecutionError> {
+    ) -> Result<(), BlockExecutionError>
+    where
+        Spec: crate::eth::spec::EthExecutorSpec,
+    {
         if self.spec.is_bogota_active_at_timestamp(evm.block().timestamp().saturating_to()) {
             eip8141::install_expiry_verifier(evm)?;
-            eip8141::install_nonce_manager(evm)?;
+            if self
+                .spec
+                .eip8250_timestamp()
+                .is_some_and(|fork| evm.block().timestamp().saturating_to::<u64>() >= fork)
+            {
+                eip8250::install_nonce_manager(evm)?;
+            }
         }
 
         Ok(())

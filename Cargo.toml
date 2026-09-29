@@ -40,16 +40,16 @@ alloy-evm = { version = "0.39.0", path = "crates/evm", default-features = false 
 # alloy
 alloy-eip2124 = { version = "0.2", default-features = false }
 alloy-chains = { version = "0.2.0", default-features = false }
-alloy-eips = { git = "https://github.com/Rimeeeeee/alloy", rev = "de8a4df4e72b3b8a57fe2fba671bdbe2bd850fba", default-features = false }
-alloy-consensus = { git = "https://github.com/Rimeeeeee/alloy", rev = "de8a4df4e72b3b8a57fe2fba671bdbe2bd850fba", default-features = false }
+alloy-eips = { git = "https://github.com/wevm/alloy", rev = "be3791c336950117b6cd13d5ae0af25ec3c456ab", default-features = false }
+alloy-consensus = { git = "https://github.com/wevm/alloy", rev = "be3791c336950117b6cd13d5ae0af25ec3c456ab", default-features = false }
 alloy-primitives = { version = "1.0.0", default-features = false }
 alloy-sol-types = { version = "1.0.0", default-features = false }
 alloy-hardforks = "0.4.8"
-alloy-rpc-types-eth = { git = "https://github.com/Rimeeeeee/alloy", rev = "de8a4df4e72b3b8a57fe2fba671bdbe2bd850fba", default-features = false }
-alloy-rpc-types-engine = { git = "https://github.com/Rimeeeeee/alloy", rev = "de8a4df4e72b3b8a57fe2fba671bdbe2bd850fba", default-features = false }
+alloy-rpc-types-eth = { git = "https://github.com/wevm/alloy", rev = "be3791c336950117b6cd13d5ae0af25ec3c456ab", default-features = false }
+alloy-rpc-types-engine = { git = "https://github.com/wevm/alloy", rev = "be3791c336950117b6cd13d5ae0af25ec3c456ab", default-features = false }
 
 # revm
-revm = { git = "https://github.com/Rimeeeeee/revm", rev = "e0bd371a78bb28f2ca0058f726f7faf315b1889c", default-features = false }
+revm = { git = "https://github.com/wevm/revm", rev = "67c9b7132906c2b5e08d334537082ccb4e8b898e", default-features = false }
 
 # tracing
 tracing = { version = "0.1", default-features = false }

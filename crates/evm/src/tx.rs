@@ -412,8 +412,12 @@ pub fn tx_env_from_eip8141(tx: TxEip8141, gas_params: &GasParams) -> TxEnv {
     // EIP-8141 has no outer ECDSA signature. Its consensus sender is an explicit field, so the
     // synthetic signer carried by `Recovered` must not be allowed to override it.
     let frame_transaction = FrameTransaction {
+        nonce_calldata: tx
+            .nonce_keys
+            .as_deref()
+            .map(|keys| alloy_eips::eip8141::nonce_calldata(keys, tx.nonce))
+            .unwrap_or_default(),
         nonce_keys: tx.nonce_keys,
-        nonce_seq: tx.nonce_seq,
         frames: tx.frames,
         signatures: tx.signatures,
         signature_hash,
@@ -432,7 +436,7 @@ pub fn tx_env_from_eip8141(tx: TxEip8141, gas_params: &GasParams) -> TxEnv {
         kind: TxKind::Call(tx.sender),
         value: U256::ZERO,
         data: Bytes::new(),
-        nonce: tx.nonce_seq,
+        nonce: tx.nonce,
         chain_id: Some(tx.chain_id),
         gas_priority_fee: Some(tx.fees.max_priority_fee_per_gas.saturating_to()),
         blob_hashes: tx.blob_versioned_hashes,
@@ -743,8 +747,8 @@ mod tests {
         let blob_hash = b256!("0100000000000000000000000000000000000000000000000000000000000001");
         let tx = TxEip8141 {
             chain_id: 1,
-            nonce_keys: vec![U256::from(9)],
-            nonce_seq: 7,
+            nonce: 7,
+            nonce_keys: Some(vec![U256::from(1)]),
             sender,
             frames: vec![Frame {
                 mode: FrameMode::Sender,
@@ -772,9 +776,9 @@ mod tests {
         assert_eq!(env.tx_type, tx.ty());
         assert_eq!(env.caller, sender);
         assert_eq!(env.kind, TxKind::Call(sender));
-        assert_eq!(env.nonce, tx.nonce_seq);
+        assert_eq!(env.nonce, tx.nonce);
         assert_eq!(frame_transaction.nonce_keys, tx.nonce_keys);
-        assert_eq!(frame_transaction.nonce_seq, tx.nonce_seq);
+        assert_eq!(frame_transaction.nonce_calldata, vec![0xc1, 0x01, 0x07]);
         assert_eq!(env.chain_id, Some(tx.chain_id));
         assert_eq!(env.gas_price, tx.fees.max_fee_per_gas.saturating_to());
         assert_eq!(env.gas_priority_fee, Some(tx.fees.max_priority_fee_per_gas.saturating_to()));
