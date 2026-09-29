@@ -3,7 +3,7 @@
 use alloy_consensus::{transaction::Recovered, TxEip4844, TxEip8141, TxEnvelope, TxType};
 use alloy_eips::{
     eip2718::WithEncoded,
-    eip8141::{Frame, FrameLimits, FrameSignature, SignatureScheme},
+    eip8141::{Frame, FrameAddress, FrameLimits, FrameMode, FrameSignature, SignatureScheme},
 };
 use alloy_evm::{
     block::{BlockExecutionError, BlockExecutor, ExecutableTxParts, InternalBlockExecutionError},
@@ -23,11 +23,16 @@ use revm::{
     context_interface::cfg::gas_params::GasId,
     database::{CacheDB, State},
     database_interface::EmptyDB,
-    primitives::hardfork::SpecId,
+    primitives::{
+        eip7906::{TxTraceParam, TXTRACE_OPCODE},
+        hardfork::SpecId,
+    },
     state::{AccountInfo, Bytecode},
 };
 
 const SENDER: Address = address!("1000000000000000000000000000000000000001");
+const STORAGE_TARGET: Address = address!("2000000000000000000000000000000000000002");
+const ASSERTION_TARGET: Address = address!("3000000000000000000000000000000000000003");
 
 fn frame_tx() -> TxEip8141 {
     TxEip8141 {
@@ -82,6 +87,57 @@ fn recovered_frame_uses_custom_schedule_during_execution() {
     let result = evm.transact(recovered()).unwrap();
     assert!(matches!(result.result, ExecutionResult::FrameTransaction { .. }));
     assert_eq!(result.state[&SENDER].info.nonce, 1);
+}
+
+#[test]
+fn post_tx_frame_observes_state_diff_through_alloy_adapter() {
+    let mut db = db();
+    // Store 1 in slot zero.
+    db.insert_account_info(
+        STORAGE_TARGET,
+        AccountInfo::default()
+            .with_code(Bytecode::new_legacy(Bytes::from_static(&[0x60, 1, 0x5f, 0x55, 0x00]))),
+    );
+    // TXTRACE(SlotsChanged, 0), return the resulting word.
+    db.insert_account_info(
+        ASSERTION_TARGET,
+        AccountInfo::default().with_code(Bytecode::new_legacy(Bytes::from_static(&[
+            0x60,
+            TxTraceParam::SlotsChanged as u8,
+            0x5f,
+            TXTRACE_OPCODE,
+            0x5f,
+            0x52,
+            0x60,
+            32,
+            0x5f,
+            0xf3,
+        ]))),
+    );
+    let mut tx = frame_tx();
+    tx.frames.extend([
+        Frame {
+            mode: FrameMode::Sender,
+            target: FrameAddress::from(STORAGE_TARGET),
+            limits: FrameLimits { execution: 100_000, state: 100_000 },
+            ..Default::default()
+        },
+        Frame {
+            mode: FrameMode::PostTx,
+            target: FrameAddress::from(ASSERTION_TARGET),
+            limits: FrameLimits { execution: 10_000, state: 0 },
+            ..Default::default()
+        },
+    ]);
+
+    let recovered = Recovered::new_unchecked(TxEnvelope::Eip8141(tx.seal_slow()), SENDER);
+    let mut evm = EthEvmFactory::default().create_evm(db, custom_env());
+    let result = evm.transact(recovered).unwrap().result;
+    let ExecutionResult::FrameTransaction { success, frame_outputs, .. } = result else {
+        panic!("expected frame transaction result");
+    };
+    assert!(success);
+    assert_eq!(U256::from_be_slice(&frame_outputs[2]), U256::from(1));
 }
 
 #[test]
@@ -260,6 +316,7 @@ fn receipt_mismatches_return_errors() {
             ExecutionResult::FrameTransaction {
                 gas: ResultGas::default(),
                 payer: SENDER,
+                success: true,
                 logs: vec![],
                 frame_receipts: vec![],
                 frame_outputs: vec![],
