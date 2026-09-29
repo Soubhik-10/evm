@@ -71,6 +71,7 @@ impl<Spec, Block: BlockEnvironment> TryIntoTxEnv<TxEnv, Spec, Block> for Transac
             value,
             input,
             nonce,
+            nonce_keys,
             access_list,
             chain_id,
             blob_versioned_hashes,
@@ -150,6 +151,7 @@ impl<Spec, Block: BlockEnvironment> TryIntoTxEnv<TxEnv, Spec, Block> for Transac
             let tx = TxEip8141 {
                 chain_id,
                 nonce,
+                nonce_keys,
                 sender: caller,
                 frames: frames
                     .unwrap_or_default()
