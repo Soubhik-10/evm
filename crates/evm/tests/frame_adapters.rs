@@ -23,7 +23,10 @@ use revm::{
     context_interface::cfg::gas_params::GasId,
     database::{CacheDB, State},
     database_interface::EmptyDB,
-    primitives::hardfork::SpecId,
+    primitives::{
+        eip7906::{TxTraceParam, TXTRACE_OPCODE},
+        hardfork::SpecId,
+    },
     state::{AccountInfo, Bytecode},
 };
 
@@ -99,7 +102,16 @@ fn post_tx_frame_observes_state_diff_through_alloy_adapter() {
     db.insert_account_info(
         ASSERTION_TARGET,
         AccountInfo::default().with_code(Bytecode::new_legacy(Bytes::from_static(&[
-            0x60, 0x01, 0x5f, 0xb7, 0x5f, 0x52, 0x60, 32, 0x5f, 0xf3,
+            0x60,
+            TxTraceParam::SlotsChanged as u8,
+            0x5f,
+            TXTRACE_OPCODE,
+            0x5f,
+            0x52,
+            0x60,
+            32,
+            0x5f,
+            0xf3,
         ]))),
     );
     let mut tx = frame_tx();
