@@ -48,20 +48,12 @@ mod tests {
     };
 
     #[test]
-    fn activation_waits_for_configured_timestamp() {
+    fn activation_follows_eip8141() {
         use alloy_hardforks::{EthereumHardfork, EthereumHardforks, ForkCondition};
         struct Spec;
         impl EthereumHardforks for Spec {
             fn ethereum_fork_activation(&self, _: EthereumHardfork) -> ForkCondition {
-                ForkCondition::Timestamp(0)
-            }
-        }
-        impl crate::eth::spec::EthExecutorSpec for Spec {
-            fn deposit_contract_address(&self) -> Option<alloy_primitives::Address> {
-                None
-            }
-            fn eip8250_timestamp(&self) -> Option<u64> {
-                Some(10)
+                ForkCondition::Timestamp(10)
             }
         }
         let mut caller = super::super::SystemCaller::new(Spec);
@@ -72,6 +64,8 @@ mod tests {
             caller.apply_eip8141_fork_transition(&mut evm).unwrap();
             let account = evm.db_mut().basic(NONCE_MANAGER).unwrap();
             assert_eq!(account.is_some(), timestamp >= 10);
+            let verifier = evm.db_mut().basic(alloy_eips::eip8141::EXPIRY_VERIFIER).unwrap();
+            assert_eq!(verifier.is_some(), timestamp >= 10);
             db = evm.into_db();
         }
     }

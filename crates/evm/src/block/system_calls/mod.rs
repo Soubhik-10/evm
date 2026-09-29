@@ -57,23 +57,14 @@ where
     /// Applies the EIP-8141 fork-state transition.
     ///
     /// Unlike the other operations in this module, this does not execute a system call. The
-    /// hardfork installs the verifier runtime directly into state.
+    /// hardfork installs the verifier and nonce-manager runtimes directly into state.
     pub fn apply_eip8141_fork_transition(
         &mut self,
         evm: &mut impl Evm<DB: DatabaseCommit>,
-    ) -> Result<(), BlockExecutionError>
-    where
-        Spec: crate::eth::spec::EthExecutorSpec,
-    {
+    ) -> Result<(), BlockExecutionError> {
         if self.spec.is_bogota_active_at_timestamp(evm.block().timestamp().saturating_to()) {
             eip8141::install_expiry_verifier(evm)?;
-            if self
-                .spec
-                .eip8250_timestamp()
-                .is_some_and(|fork| evm.block().timestamp().saturating_to::<u64>() >= fork)
-            {
-                eip8250::install_nonce_manager(evm)?;
-            }
+            eip8250::install_nonce_manager(evm)?;
         }
 
         Ok(())
