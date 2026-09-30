@@ -4,8 +4,8 @@ use alloy_consensus::{transaction::Recovered, TxEip4844, TxEip8141, TxEnvelope, 
 use alloy_eips::{
     eip2718::WithEncoded,
     eip8141::{
-        Frame, FrameAddress, FrameLimits, FrameMode, FrameSignature, SignatureScheme, NONCE_MANAGER,
-        NONCE_MANAGER_CODE,
+        Frame, FrameAddress, FrameLimits, FrameMode, FrameSignature, SignatureScheme,
+        NONCE_MANAGER, NONCE_MANAGER_CODE,
     },
 };
 use alloy_evm::{
@@ -193,7 +193,8 @@ fn wrappers_forward_the_custom_schedule() {
     let env = custom_env();
     let gas = &env.cfg_env.gas_params;
     let tx = recovered();
-    let expected = 62_795;
+    // 12_000 base + 475 frame + four nonzero calldata tokens at 20 + 50_000 execution.
+    let expected = 62_555;
     let check = |env: TxEnv| assert_eq!(env.gas_limit, expected);
     check(tx.to_tx_env_with_gas_params(gas));
     check((&tx).into_tx_env_with_gas_params(gas));
@@ -272,7 +273,7 @@ fn owned_frame_conversion_moves_buffers() {
 fn custom_schedule_is_used_before_block_admission() {
     let mut env = custom_env();
     // This transaction fits exactly. The actual consumption is lower.
-    env.block_env.gas_limit = 62_795;
+    env.block_env.gas_limit = 62_555;
     let state = State::builder().with_database(db()).build();
     let evm = EthEvmFactory::default().create_evm(state, env.clone());
     let mut executor =
@@ -289,8 +290,8 @@ fn custom_schedule_is_used_before_block_admission() {
         executor.execute_transaction(recovered()),
         Err(BlockExecutionError::Validation(
             alloy_evm::block::BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                transaction_gas_limit: 62_795,
-                block_available_gas: 62_794,
+                transaction_gas_limit: 62_555,
+                block_available_gas: 62_554,
             }
         ))
     ));
