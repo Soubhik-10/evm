@@ -56,20 +56,17 @@ mod tests {
                 ForkCondition::Timestamp(10)
             }
         }
-        for enabled in [false, true] {
-            let mut caller = super::super::SystemCaller::new(Spec);
-            let mut db = CacheDB::<EmptyDB>::default();
-            for timestamp in [9, 10, 11] {
-                let mut env = EvmEnv::default().with_timestamp(U256::from(timestamp));
-                env.cfg_env.enable_eip8250 = enabled;
-                let mut evm = EthEvmFactory.create_evm(db, env);
-                caller.apply_eip8141_fork_transition(&mut evm).unwrap();
-                let account = evm.db_mut().basic(NONCE_MANAGER).unwrap();
-                assert_eq!(account.is_some(), enabled && timestamp >= 10);
-                let verifier = evm.db_mut().basic(alloy_eips::eip8141::EXPIRY_VERIFIER).unwrap();
-                assert_eq!(verifier.is_some(), timestamp >= 10);
-                db = evm.into_db();
-            }
+        let mut caller = super::super::SystemCaller::new(Spec);
+        let mut db = CacheDB::<EmptyDB>::default();
+        for timestamp in [9, 10, 11] {
+            let mut evm = EthEvmFactory
+                .create_evm(db, EvmEnv::default().with_timestamp(U256::from(timestamp)));
+            caller.apply_eip8141_fork_transition(&mut evm).unwrap();
+            let account = evm.db_mut().basic(NONCE_MANAGER).unwrap();
+            assert_eq!(account.is_some(), timestamp >= 10);
+            let verifier = evm.db_mut().basic(alloy_eips::eip8141::EXPIRY_VERIFIER).unwrap();
+            assert_eq!(verifier.is_some(), timestamp >= 10);
+            db = evm.into_db();
         }
     }
 

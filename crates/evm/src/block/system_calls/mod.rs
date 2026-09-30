@@ -65,9 +65,7 @@ where
     ) -> Result<(), BlockExecutionError> {
         if self.spec.is_bogota_active_at_timestamp(evm.block().timestamp().saturating_to()) {
             eip8141::install_expiry_verifier(evm)?;
-            if evm.cfg_env().enable_eip8250 {
-                eip8250::install_nonce_manager(evm)?;
-            }
+            eip8250::install_nonce_manager(evm)?;
             eip8272::install_recent_root_contract(evm)?;
         }
 

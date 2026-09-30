@@ -63,8 +63,7 @@ impl EvmEnv<SpecId> {
         let spec =
             crate::spec_by_timestamp_and_block_number(&chain_spec, input.timestamp, input.number);
         let mut cfg_env = CfgEnv::new_with_spec(spec).with_chain_id(chain_id);
-        cfg_env.enable_eip8250 =
-            super::EIP8250_ENABLED && chain_spec.is_bogota_active_at_timestamp(input.timestamp);
+        cfg_env.enable_eip8250 = chain_spec.is_bogota_active_at_timestamp(input.timestamp);
 
         if let Some(blob_params) = &blob_params {
             cfg_env.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
@@ -235,10 +234,7 @@ mod tests {
         for timestamp in [9, 10, 11] {
             let header = Header { timestamp, ..Default::default() };
             let env = EvmEnv::for_eth_block(header, Spec, 1, None);
-            assert_eq!(
-                env.cfg_env.enable_eip8250,
-                super::super::EIP8250_ENABLED && timestamp >= 10
-            );
+            assert_eq!(env.cfg_env.enable_eip8250, timestamp >= 10);
             assert_eq!(env.cfg_env.spec == SpecId::BOGOTA, timestamp >= 10);
         }
     }
