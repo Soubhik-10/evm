@@ -113,6 +113,7 @@ mod tests {
         let result = ExecutionResult::<HaltReason>::FrameTransaction {
             gas: ResultGas::default().with_total_gas_spent(42),
             payer,
+            success: true,
             logs: frame_receipts[0].logs.clone(),
             frame_receipts: frame_receipts.clone(),
             frame_outputs: vec![Default::default()],
