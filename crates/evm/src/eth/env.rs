@@ -63,6 +63,7 @@ impl EvmEnv<SpecId> {
         let spec =
             crate::spec_by_timestamp_and_block_number(&chain_spec, input.timestamp, input.number);
         let mut cfg_env = CfgEnv::new_with_spec(spec).with_chain_id(chain_id);
+        cfg_env.enable_eip8250 = chain_spec.is_bogota_active_at_timestamp(input.timestamp);
 
         if let Some(blob_params) = &blob_params {
             cfg_env.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
@@ -217,6 +218,26 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_hardforks::ethereum::MAINNET_PARIS_BLOCK;
     use alloy_primitives::B256;
+
+    #[test]
+    fn keyed_nonce_activation_follows_frames() {
+        use alloy_hardforks::{EthereumHardfork, ForkCondition};
+        struct Spec;
+        impl EthereumHardforks for Spec {
+            fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
+                match fork {
+                    EthereumHardfork::Bogota => ForkCondition::Timestamp(10),
+                    _ => ForkCondition::Never,
+                }
+            }
+        }
+        for timestamp in [9, 10, 11] {
+            let header = Header { timestamp, ..Default::default() };
+            let env = EvmEnv::for_eth_block(header, Spec, 1, None);
+            assert_eq!(env.cfg_env.enable_eip8250, timestamp >= 10);
+            assert_eq!(env.cfg_env.spec == SpecId::BOGOTA, timestamp >= 10);
+        }
+    }
 
     #[test_case::test_case(
         Header::default(),

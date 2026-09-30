@@ -14,6 +14,7 @@ mod eip4788;
 mod eip7002;
 mod eip7251;
 mod eip8141;
+mod eip8250;
 mod eip8282;
 
 pub use eip8282::{
@@ -56,13 +57,14 @@ where
     /// Applies the EIP-8141 fork-state transition.
     ///
     /// Unlike the other operations in this module, this does not execute a system call. The
-    /// hardfork installs the verifier runtime directly into state.
+    /// hardfork installs the verifier and nonce-manager runtimes directly into state.
     pub fn apply_eip8141_fork_transition(
         &mut self,
         evm: &mut impl Evm<DB: DatabaseCommit>,
     ) -> Result<(), BlockExecutionError> {
         if self.spec.is_bogota_active_at_timestamp(evm.block().timestamp().saturating_to()) {
             eip8141::install_expiry_verifier(evm)?;
+            eip8250::install_nonce_manager(evm)?;
         }
 
         Ok(())

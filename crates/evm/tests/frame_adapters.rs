@@ -3,17 +3,23 @@
 use alloy_consensus::{transaction::Recovered, TxEip4844, TxEip8141, TxEnvelope, TxType};
 use alloy_eips::{
     eip2718::WithEncoded,
-    eip8141::{Frame, FrameLimits, FrameSignature, SignatureScheme},
+    eip8141::{
+        Frame, FrameLimits, FrameSignature, SignatureScheme, NONCE_MANAGER, NONCE_MANAGER_CODE,
+    },
 };
 use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor, ExecutableTxParts, InternalBlockExecutionError},
+    block::{
+        BlockExecutionError, BlockExecutor, ExecutableTxParts, InternalBlockExecutionError,
+        SystemCaller,
+    },
     eth::{
         receipt_builder::{AlloyReceiptBuilder, ReceiptBuilder, ReceiptBuilderCtx},
-        spec::EthSpec,
+        spec::{EthExecutorSpec, EthSpec},
         EthBlockExecutionCtx, EthBlockExecutor, EthEvmFactory, EthTxResult,
     },
     tx_env_from_eip8141, Evm, EvmEnv, EvmFactory, FromRecoveredTx, IntoTxEnv, ToTxEnv,
 };
+use alloy_hardforks::{EthereumHardfork, EthereumHardforks, ForkCondition};
 use alloy_primitives::{address, Address, Bytes, Sealable, B256, U256};
 use revm::{
     context::{
@@ -50,7 +56,7 @@ fn custom_env() -> EvmEnv {
 }
 
 fn db() -> CacheDB<EmptyDB> {
-    let mut db = CacheDB::default();
+    let mut db: CacheDB<EmptyDB> = CacheDB::default();
     // PUSH1 3, PUSH0, PUSH0, APPROVE: approve execution and payment.
     db.insert_account_info(
         SENDER,
@@ -76,6 +82,47 @@ const fn context() -> EthBlockExecutionCtx<'static> {
     }
 }
 
+#[derive(Clone)]
+struct BogotaSpec;
+
+impl EthereumHardforks for BogotaSpec {
+    fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
+        if fork == EthereumHardfork::Bogota {
+            ForkCondition::Timestamp(0)
+        } else {
+            ForkCondition::Never
+        }
+    }
+}
+
+impl EthExecutorSpec for BogotaSpec {
+    fn deposit_contract_address(&self) -> Option<Address> {
+        None
+    }
+}
+
+#[test]
+fn nonce_manager_transition_preserves_balance_and_consumed_slots() {
+    let mut db: CacheDB<EmptyDB> = CacheDB::default();
+    db.insert_account_info(
+        NONCE_MANAGER,
+        AccountInfo { nonce: 2, balance: U256::from(17), ..Default::default() },
+    );
+    let mut evm = EthEvmFactory::default().create_evm(db, custom_env());
+    let mut caller = SystemCaller::new(BogotaSpec);
+    caller.apply_eip8141_fork_transition(&mut evm).unwrap();
+
+    let installed = revm::Database::basic(evm.db_mut(), NONCE_MANAGER).unwrap().unwrap();
+    assert_eq!(installed.nonce, 2);
+    assert_eq!(installed.balance, U256::from(17));
+    assert_eq!(installed.code_hash, alloy_primitives::keccak256(NONCE_MANAGER_CODE));
+
+    let slot = U256::from(123);
+    evm.db_mut().insert_account_storage(NONCE_MANAGER, slot, U256::from(7)).unwrap();
+    caller.apply_eip8141_fork_transition(&mut evm).unwrap();
+    assert_eq!(revm::Database::storage(evm.db_mut(), NONCE_MANAGER, slot).unwrap(), U256::from(7));
+}
+
 #[test]
 fn recovered_frame_uses_custom_schedule_during_execution() {
     let mut evm = EthEvmFactory::default().create_evm(db(), custom_env());
@@ -89,7 +136,7 @@ fn wrappers_forward_the_custom_schedule() {
     let env = custom_env();
     let gas = &env.cfg_env.gas_params;
     let tx = recovered();
-    let expected = 62_555;
+    let expected = 62_795;
     let check = |env: TxEnv| assert_eq!(env.gas_limit, expected);
     check(tx.to_tx_env_with_gas_params(gas));
     check((&tx).into_tx_env_with_gas_params(gas));
@@ -168,7 +215,7 @@ fn owned_frame_conversion_moves_buffers() {
 fn custom_schedule_is_used_before_block_admission() {
     let mut env = custom_env();
     // This transaction fits exactly. The actual consumption is lower.
-    env.block_env.gas_limit = 62_555;
+    env.block_env.gas_limit = 62_795;
     let state = State::builder().with_database(db()).build();
     let evm = EthEvmFactory::default().create_evm(state, env.clone());
     let mut executor =
@@ -185,8 +232,8 @@ fn custom_schedule_is_used_before_block_admission() {
         executor.execute_transaction(recovered()),
         Err(BlockExecutionError::Validation(
             alloy_evm::block::BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                transaction_gas_limit: 62_555,
-                block_available_gas: 62_554,
+                transaction_gas_limit: 62_795,
+                block_available_gas: 62_794,
             }
         ))
     ));
@@ -325,7 +372,7 @@ fn rpc_frame_uses_custom_schedule_and_preserves_request_frames() {
         .map(|frame| frame.try_into().unwrap())
         .collect();
     let env = request.try_into_tx_env(&custom_env()).unwrap();
-    assert_eq!(env.gas_limit, 62_555);
+    assert_eq!(env.gas_limit, 62_795);
     assert_eq!(env.frame_transaction.as_ref().unwrap().frames, frames);
     let mut evm = EthEvmFactory::default().create_evm(db(), custom_env());
     assert!(evm.transact(env).is_ok());

@@ -412,6 +412,12 @@ pub fn tx_env_from_eip8141(tx: TxEip8141, gas_params: &GasParams) -> TxEnv {
     // EIP-8141 has no outer ECDSA signature. Its consensus sender is an explicit field, so the
     // synthetic signer carried by `Recovered` must not be allowed to override it.
     let frame_transaction = FrameTransaction {
+        nonce_calldata: tx
+            .nonce_keys
+            .as_deref()
+            .map(|keys| alloy_eips::eip8141::nonce_calldata(keys, tx.nonce))
+            .unwrap_or_default(),
+        nonce_keys: tx.nonce_keys,
         frames: tx.frames,
         signatures: tx.signatures,
         signature_hash,
@@ -742,6 +748,7 @@ mod tests {
         let tx = TxEip8141 {
             chain_id: 1,
             nonce: 7,
+            nonce_keys: Some(vec![U256::from(1)]),
             sender,
             frames: vec![Frame {
                 mode: FrameMode::Sender,
@@ -770,6 +777,8 @@ mod tests {
         assert_eq!(env.caller, sender);
         assert_eq!(env.kind, TxKind::Call(sender));
         assert_eq!(env.nonce, tx.nonce);
+        assert_eq!(frame_transaction.nonce_keys, tx.nonce_keys);
+        assert_eq!(frame_transaction.nonce_calldata, vec![0xc1, 0x01, 0x07]);
         assert_eq!(env.chain_id, Some(tx.chain_id));
         assert_eq!(env.gas_price, tx.fees.max_fee_per_gas.saturating_to());
         assert_eq!(env.gas_priority_fee, Some(tx.fees.max_priority_fee_per_gas.saturating_to()));
