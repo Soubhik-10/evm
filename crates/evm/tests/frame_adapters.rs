@@ -114,7 +114,9 @@ fn nonce_manager_transition_preserves_balance_and_consumed_slots() {
         NONCE_MANAGER,
         AccountInfo { nonce: 2, balance: U256::from(17), ..Default::default() },
     );
-    let mut evm = EthEvmFactory::default().create_evm(db, custom_env());
+    let mut env = custom_env();
+    env.cfg_env.enable_eip8250 = true;
+    let mut evm = EthEvmFactory::default().create_evm(db, env);
     let mut caller = SystemCaller::new(BogotaSpec);
     caller.apply_eip8141_fork_transition(&mut evm).unwrap();
 

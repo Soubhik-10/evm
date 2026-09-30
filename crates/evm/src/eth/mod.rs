@@ -36,6 +36,11 @@ pub mod spec;
 mod env;
 pub(crate) mod spec_id;
 
+/// Temporary frames-devnet switch for EIP-8250. Set to `true` to restore activation at Bogota.
+///
+/// This changes consensus rules; all participating nodes must use the same setting.
+pub const EIP8250_ENABLED: bool = false;
+
 /// The Ethereum EVM context type.
 pub type EthEvmContext<DB> = Context<BlockEnv, TxEnv, CfgEnv, DB>;
 
