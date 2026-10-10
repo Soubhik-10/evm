@@ -9,10 +9,7 @@ use alloy_eips::{
     },
 };
 use alloy_evm::{
-    block::{
-        BlockExecutionError, BlockExecutor, ExecutableTxParts, InternalBlockExecutionError,
-        SystemCaller,
-    },
+    block::{BlockExecutionError, BlockExecutor, ExecutableTxParts, InternalBlockExecutionError},
     eth::{
         receipt_builder::{AlloyReceiptBuilder, ReceiptBuilder, ReceiptBuilderCtx},
         spec::{EthExecutorSpec, EthSpec},
@@ -108,25 +105,64 @@ impl EthExecutorSpec for BogotaSpec {
 }
 
 #[test]
-fn nonce_manager_transition_preserves_balance_and_consumed_slots() {
-    let mut db: CacheDB<EmptyDB> = CacheDB::default();
-    db.insert_account_info(
-        NONCE_MANAGER,
-        AccountInfo { nonce: 2, balance: U256::from(17), ..Default::default() },
-    );
-    let mut evm = EthEvmFactory::default().create_evm(db, custom_env());
-    let mut caller = SystemCaller::new(BogotaSpec);
-    caller.apply_eip8141_fork_transition(&mut evm).unwrap();
+fn bogota_activation_does_not_deploy_or_modify_ordinary_contracts() {
+    use alloy_eips::{
+        eip8141::{EXPIRY_VERIFIER, EXPIRY_VERIFIER_RUNTIME},
+        eip8272::{RECENT_ROOT_ADDRESS, RECENT_ROOT_CODE},
+    };
 
-    let installed = revm::Database::basic(evm.db_mut(), NONCE_MANAGER).unwrap().unwrap();
-    assert_eq!(installed.nonce, 2);
-    assert_eq!(installed.balance, U256::from(17));
-    assert_eq!(installed.code_hash, alloy_primitives::keccak256(NONCE_MANAGER_CODE));
-
+    let contracts = [
+        (EXPIRY_VERIFIER, Bytes::copy_from_slice(&EXPIRY_VERIFIER_RUNTIME)),
+        (NONCE_MANAGER, Bytes::copy_from_slice(&NONCE_MANAGER_CODE)),
+        (RECENT_ROOT_ADDRESS, RECENT_ROOT_CODE.clone()),
+    ];
+    let old_addresses = [
+        address!("0000000000000000000000000000000000008141"),
+        address!("0000000000000000000000000000000000008250"),
+        address!("0000000000000000000000000000000000008272"),
+    ];
     let slot = U256::from(123);
-    evm.db_mut().insert_account_storage(NONCE_MANAGER, slot, U256::from(7)).unwrap();
-    caller.apply_eip8141_fork_transition(&mut evm).unwrap();
-    assert_eq!(revm::Database::storage(evm.db_mut(), NONCE_MANAGER, slot).unwrap(), U256::from(7));
+    for deployed in [false, true] {
+        let mut db: CacheDB<EmptyDB> = CacheDB::default();
+        if deployed {
+            for (address, code) in &contracts {
+                db.insert_account_info(
+                    *address,
+                    AccountInfo { nonce: 1, balance: U256::from(17), ..Default::default() }
+                        .with_code(Bytecode::new_legacy(code.clone())),
+                );
+                db.insert_account_storage(*address, slot, U256::from(7)).unwrap();
+            }
+        }
+        let mut state = State::builder().with_database(db).with_bal_builder().build();
+        // Exercise activation and the subsequent block using the same state.
+        for number in [1, 2] {
+            let env = custom_env().with_block_number(U256::from(number));
+            let evm = EthEvmFactory::default().create_evm(state, env);
+            let mut executor =
+                EthBlockExecutor::new(evm, context(), BogotaSpec, AlloyReceiptBuilder::default());
+            executor.apply_pre_execution_changes().unwrap();
+            let db = executor.evm.db_mut();
+            for (address, code) in &contracts {
+                let account = revm::Database::basic(db, *address).unwrap();
+                if deployed {
+                    let account = account.unwrap();
+                    assert_eq!(account.nonce, 1);
+                    assert_eq!(account.balance, U256::from(17));
+                    assert_eq!(account.code_hash, alloy_primitives::keccak256(code));
+                    assert_eq!(revm::Database::storage(db, *address, slot).unwrap(), U256::from(7));
+                } else {
+                    assert!(account.is_none());
+                }
+            }
+            for address in old_addresses {
+                assert!(revm::Database::basic(db, address).unwrap().is_none());
+            }
+            assert!(db.take_built_alloy_bal().unwrap().is_empty());
+            state = executor.evm.into_db();
+            state.bal_state = state.bal_state.with_bal_builder();
+        }
+    }
 }
 
 #[test]

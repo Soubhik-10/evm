@@ -318,8 +318,6 @@ where
         self.system_caller
             .apply_beacon_root_contract_call(self.ctx.parent_beacon_block_root, &mut self.evm)?;
 
-        self.system_caller.apply_eip8141_fork_transition(&mut self.evm)?;
-
         Ok(())
     }
 
