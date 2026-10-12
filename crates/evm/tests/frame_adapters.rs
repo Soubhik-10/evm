@@ -27,10 +27,7 @@ use revm::{
     context_interface::cfg::gas_params::GasId,
     database::{CacheDB, State},
     database_interface::EmptyDB,
-    primitives::{
-        eip7906::{TxTraceParam, TXTRACE_OPCODE},
-        hardfork::SpecId,
-    },
+    primitives::{eip7906::TxTraceParam, hardfork::SpecId},
     state::{AccountInfo, Bytecode},
 };
 
@@ -186,10 +183,10 @@ fn post_tx_frame_observes_state_diff_through_alloy_adapter() {
     db.insert_account_info(
         ASSERTION_TARGET,
         AccountInfo::default().with_code(Bytecode::new_legacy(Bytes::from_static(&[
+            0x5f,
             0x60,
             TxTraceParam::SlotsChanged as u8,
-            0x5f,
-            TXTRACE_OPCODE,
+            0xb6,
             0x5f,
             0x52,
             0x60,
