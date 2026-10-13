@@ -282,6 +282,33 @@ fn standard_transaction_conversion_does_not_change() {
 }
 
 #[test]
+fn keyed_nonce_consensus_and_execution_gas_caps_agree() {
+    let env: EvmEnv = EvmEnv::new(CfgEnv::new_with_spec(SpecId::BOGOTA), Default::default());
+    for floor_binding in [false, true] {
+        for count in [0, 1, 2, 16] {
+            let mut tx = frame_tx();
+            tx.nonce_keys = Some(if count == 0 {
+                vec![U256::ZERO]
+            } else {
+                (1..=count).map(U256::from).collect()
+            });
+            if floor_binding {
+                tx.frames[0].data = vec![1; 1_000].into();
+                tx.frames[0].limits.execution = 0;
+            }
+            let consensus_limit = tx.calculate_gas_limit();
+            let converted = tx_env_from_eip8141(tx, &env.cfg_env.gas_params);
+            assert_eq!(converted.gas_limit, consensus_limit);
+            let payload = converted.frame_transaction.as_ref().unwrap();
+            assert_eq!(
+                payload.keyed_nonce_access_gas_with_params(&env.cfg_env.gas_params),
+                Some(count * 12_100)
+            );
+        }
+    }
+}
+
+#[test]
 fn owned_frame_conversion_moves_buffers() {
     let mut tx = frame_tx();
     tx.signatures =
