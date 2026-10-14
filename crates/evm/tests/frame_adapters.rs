@@ -171,6 +171,46 @@ fn recovered_frame_uses_custom_schedule_during_execution() {
 }
 
 #[test]
+fn post_tx_atomic_batch_errors_survive_the_alloy_adapter() {
+    for preceding_sender in [false, true] {
+        let mut tx = frame_tx();
+        if preceding_sender {
+            tx.frames.push(Frame {
+                mode: FrameMode::Sender,
+                target: FrameAddress::from(ASSERTION_TARGET),
+                limits: FrameLimits { execution: 10_000, state: 0 },
+                ..Default::default()
+            });
+        }
+        tx.frames.extend([
+            Frame {
+                mode: FrameMode::Sender,
+                flags: 0x04,
+                target: FrameAddress::from(STORAGE_TARGET),
+                limits: FrameLimits { execution: 10_000, state: 0 },
+                ..Default::default()
+            },
+            Frame {
+                mode: FrameMode::PostTx,
+                target: FrameAddress::from(ASSERTION_TARGET),
+                limits: FrameLimits { execution: 10_000, state: 0 },
+                ..Default::default()
+            },
+        ]);
+        let mut database = db();
+        database.insert_account_info(
+            STORAGE_TARGET,
+            AccountInfo::default()
+                .with_code(Bytecode::new_legacy(Bytes::from_static(&[0x5f, 0x5f, 0xfd]))),
+        );
+        let recovered = Recovered::new_unchecked(TxEnvelope::Eip8141(tx.seal_slow()), SENDER);
+        let mut evm = EthEvmFactory::default().create_evm(database, custom_env());
+        let error = evm.transact(recovered).unwrap_err();
+        assert!(error.to_string().contains("EIP-7906 atomic batch cannot end on a POST_TX frame"));
+    }
+}
+
+#[test]
 fn post_tx_frame_observes_state_diff_through_alloy_adapter() {
     let mut db = db();
     // Store 1 in slot zero.
